@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+export APP_EFFECTIVE_NAME="${VITE_APP_NAME:-${APP_NAME:-Perth AI}}"
+export WORKSPACE_EFFECTIVE_NAME="${VITE_WORKSPACE_NAME:-${WORKSPACE_NAME:-Perth AI}}"
+export WORKSPACE_EFFECTIVE_SLUG="${VITE_WORKSPACE_SLUG:-${WORKSPACE_SLUG:-perth-ai}}"
+export BACKEND_EFFECTIVE_URL="${VITE_TOWER_URL:-${VITE_DEFAULT_SUPERBASED_URL:-${TOWER_URL:-}}}"
+export APP_EFFECTIVE_NPUB="${VITE_APP_NPUB:-${APP_NPUB:-}}"
+export WORKSPACE_EFFECTIVE_OWNER_NPUB="${VITE_WORKSPACE_OWNER_NPUB:-${WORKSPACE_OWNER_NPUB:-}}"
+export PUBLIC_EFFECTIVE_GROUP_ID="${VITE_PUBLIC_GROUP_ID:-${PUBLIC_GROUP_ID:-}}"
+export PUBLIC_EFFECTIVE_GROUP_NPUB="${VITE_PUBLIC_GROUP_NPUB:-${PUBLIC_GROUP_NPUB:-}}"
+
+envsubst < /opt/perth-ai/config.template.js > /usr/share/nginx/html/config.js
+envsubst < /opt/perth-ai/llms.template.txt > /usr/share/nginx/html/llms.txt

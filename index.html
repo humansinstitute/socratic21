@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Perth AI</title>
+    <script src="/config.js"></script>
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
@@ -57,13 +58,7 @@
         </template>
 
         <section x-show="route.name === 'home'" class="page page-home">
-          <section class="hero-stage hero-stage-large" :style="heroStyle">
-            <div class="hero-stage-overlay">
-              <span class="eyebrow bright">Socratic Seminars</span>
-              <h1 x-text="workspaceTitle"></h1>
-              <p class="hero-stage-copy" x-text="workspaceSummary"></p>
-            </div>
-          </section>
+          <section class="hero-stage hero-stage-large" :style="heroStyle"></section>
 
           <div class="main-flow">
             <section class="content-block home-section">
@@ -94,6 +89,11 @@
                 <h2 x-text="workspaceTitle"></h2>
               </div>
               <div class="markdown-body" x-html="workspaceDescriptionHtml"></div>
+              <template x-if="meetupUrl">
+                <div class="form-actions">
+                  <a class="primary-link" :href="meetupUrl" target="_blank" rel="noreferrer">View Meetup Group</a>
+                </div>
+              </template>
             </section>
 
             <section class="content-block home-section archive-block">
@@ -144,57 +144,103 @@
                     <a class="primary-link" :href="currentEvent.external_url" target="_blank" rel="noreferrer">Open Meetup</a>
                   </template>
                 </div>
-                <div class="event-hero-image" :style="`background-image: linear-gradient(180deg, rgba(8,18,34,.08), rgba(8,18,34,.34)), url('${eventImageUrl(currentEvent)}');`"></div>
+                <div class="event-hero-image">
+                  <div class="event-hero-image-bg" :style="`background-image: url('${eventImageUrl(currentEvent)}');`"></div>
+                  <img
+                    class="event-hero-image-main"
+                    :src="eventImageUrl(currentEvent)"
+                    :alt="currentEvent?.title || 'Event image'"
+                  />
+                </div>
               </section>
 
-              <section class="content-block">
-                <div class="markdown-body" x-html="renderMarkdown(currentEvent?.description || '')"></div>
-              </section>
-
-              <section class="content-block">
-                <div class="section-heading compact">
-                  <h2>Topics</h2>
-                  <template x-if="session">
-                    <button class="secondary-link" @click="openTopicSubmission(currentEvent?.record_id || '')">Submit Topic</button>
-                  </template>
+              <section class="content-block event-tabs-block">
+                <div class="tabs-row" role="tablist" aria-label="Event content tabs">
+                  <button
+                    class="tab-button"
+                    role="tab"
+                    :aria-selected="eventTab === 'about'"
+                    :class="{ 'is-active': eventTab === 'about' }"
+                    @click="setEventTab('about')"
+                  >
+                    About
+                  </button>
+                  <button
+                    class="tab-button"
+                    role="tab"
+                    :aria-selected="eventTab === 'topics'"
+                    :class="{ 'is-active': eventTab === 'topics' }"
+                    @click="setEventTab('topics')"
+                  >
+                    Topics
+                  </button>
                 </div>
 
-                <div class="topic-list">
-                  <template x-for="topic in visibleTopicsForEvent(currentEvent?.record_id || '')" :key="topic.record_id">
-                    <article class="topic-card topic-card-prominent">
-                      <div class="topic-card-head">
-                        <div>
-                          <span class="card-meta" x-text="displayTopicState(topic)"></span>
-                          <h3 x-text="topic.title"></h3>
+                <div class="tab-content" x-show="eventTab === 'about'">
+                  <div class="markdown-body" x-html="renderMarkdown(currentEvent?.description || '')"></div>
+                </div>
+
+                <div class="tab-content" x-show="eventTab === 'topics'">
+                  <div class="section-heading compact">
+                    <h2>Topics</h2>
+                    <template x-if="session">
+                      <button class="secondary-link" @click="openTopicSubmission(currentEvent?.record_id || '')">Submit Topic</button>
+                    </template>
+                  </div>
+
+	                  <div class="topic-list">
+	                    <template x-for="topic in visibleTopicsForEvent(currentEvent?.record_id || '')" :key="topic.record_id">
+	                      <article
+	                        class="topic-card topic-card-prominent topic-card-clickable"
+	                        :id="topicAnchorId(topic)"
+	                        role="link"
+	                        tabindex="0"
+	                        @click="openTopicFromCard(topic)"
+	                        @keydown.enter.prevent="openTopicFromCard(topic)"
+	                        @keydown.space.prevent="openTopicFromCard(topic)"
+	                      >
+	                        <div class="topic-card-head">
+	                          <div>
+	                            <span class="card-meta" x-text="displayTopicState(topic)"></span>
+	                            <h3 x-text="topic.title"></h3>
+	                          </div>
+	                          <template x-if="isAdmin">
+	                            <div class="overflow-menu" @click.stop @click.outside="closeTopicActionMenu()">
+	                              <button
+	                                type="button"
+	                                class="menu-trigger"
+	                                aria-label="Topic actions"
+	                                :aria-expanded="topicActionMenuId === topic.record_id"
+	                                @click.stop="toggleTopicActionMenu(topic.record_id)"
+	                              >...</button>
+	                              <div class="overflow-menu-panel" x-show="topicActionMenuId === topic.record_id" x-transition.opacity>
+	                                <button type="button" @click.stop="moveTopic(topic.record_id, -1)">Up</button>
+	                                <button type="button" @click.stop="moveTopic(topic.record_id, 1)">Down</button>
+	                                <button type="button" @click.stop="editTopic(topic.record_id)">Edit</button>
+	                              </div>
+	                            </div>
+	                          </template>
+	                        </div>
+                        <div class="topic-card-body">
+                          <p x-text="topic.description_excerpt || excerpt(topic.description_markdown)"></p>
                         </div>
-                        <template x-if="isAdmin">
-                          <div class="topic-admin-actions">
-                            <button @click="moveTopic(topic.record_id, -1)">Up</button>
-                            <button @click="moveTopic(topic.record_id, 1)">Down</button>
-                            <button @click="editTopic(topic.record_id)">Edit</button>
-                          </div>
-                        </template>
-                      </div>
-                      <div class="topic-card-body">
-                        <p x-text="topic.description_excerpt || excerpt(topic.description_markdown)"></p>
-                      </div>
-                      <div class="topic-card-foot">
-                        <div class="author-chip">
-                          <template x-if="authorAvatar(topic.author_npub)">
-                            <img class="author-avatar" :src="authorAvatar(topic.author_npub)" alt="" />
-                          </template>
-                          <template x-if="!authorAvatar(topic.author_npub)">
-                            <span class="author-avatar author-avatar-fallback" x-text="authorFallback(topic.author_npub)"></span>
-                          </template>
-                          <span x-text="authorLabel(topic.author_npub)"></span>
-                        </div>
-                        <button class="card-link-inline" @click.prevent="go(topicUrlForRecord(topic))">Open Topic</button>
-                      </div>
-                    </article>
-                  </template>
-                  <template x-if="visibleTopicsForEvent(currentEvent?.record_id || '').length === 0">
-                    <div class="empty-state">No topics published for this event yet.</div>
-                  </template>
+	                        <div class="topic-card-foot">
+	                          <div class="author-chip">
+	                            <template x-if="authorAvatar(topic.author_npub)">
+                              <img class="author-avatar" :src="authorAvatar(topic.author_npub)" alt="" />
+                            </template>
+                            <template x-if="!authorAvatar(topic.author_npub)">
+                              <span class="author-avatar author-avatar-fallback" x-text="authorFallback(topic.author_npub)"></span>
+	                            </template>
+	                            <span x-text="authorLabel(topic.author_npub)"></span>
+	                          </div>
+	                        </div>
+	                      </article>
+	                    </template>
+                    <template x-if="visibleTopicsForEvent(currentEvent?.record_id || '').length === 0">
+                      <div class="empty-state">No topics published for this event yet.</div>
+                    </template>
+                  </div>
                 </div>
               </section>
 
@@ -281,67 +327,63 @@
         </section>
 
         <section x-show="route.name === 'login'" class="page page-login">
-          <div class="auth-grid">
-            <div class="editor-panel">
-              <h2>Use Browser Extension</h2>
-              <p>Log in with a NIP-07 browser signer, with NIP-44 support for workspace access and wrapped keys.</p>
-              <div class="auth-status-row">
-                <span class="auth-badge" :class="{ 'is-live': extensionSignerAvailable }" x-text="extensionSignerAvailable ? 'Extension detected' : 'Extension not detected'"></span>
+          <div class="auth-landing">
+            <div class="editor-panel auth-panel-card">
+              <span class="eyebrow">Sign In</span>
+              <h2>Choose how you want to enter Perth AI</h2>
+              <p class="auth-panel-copy">Start with a new browser-local Nostr key, use your browser extension, or drop into advanced options for bunker and nsec login.</p>
+
+              <div class="auth-options-list">
+                <button type="button" class="auth-option-card auth-option-card-primary" :disabled="saving" @click="createLocalAccount()">
+                  <div>
+                    <strong>Sign Up</strong>
+                    <p>Create a browser-local Nostr key, then complete your profile before publishing.</p>
+                  </div>
+                  <span class="auth-option-action" x-text="saving ? 'Working…' : 'Create key'"></span>
+                </button>
+
+                <button type="button" class="auth-option-card" :disabled="saving || !extensionSignerAvailable" @click="loginWithExtension()">
+                  <div>
+                    <strong>Browser Extension</strong>
+                    <p>Use a NIP-07 signer with NIP-44 support for workspace access and wrapped keys.</p>
+                  </div>
+                  <span class="auth-option-meta" :class="{ 'is-live': extensionSignerAvailable }" x-text="extensionSignerAvailable ? 'Detected' : 'Not detected'"></span>
+                </button>
               </div>
-              <div class="form-actions">
-                <button type="button" class="primary-link" :disabled="saving || !extensionSignerAvailable" @click="loginWithExtension()">Log In With Extension</button>
-              </div>
+
+              <details class="auth-advanced-panel">
+                <summary>Advanced options</summary>
+                <p>Use your existing nsec or connect to a bunker signer.</p>
+
+                <form class="auth-inline-form" @submit.prevent="loginWithNsec()">
+                  <label>
+                    <span>NSEC</span>
+                    <textarea x-model="loginForm.nsec" rows="4" placeholder="nsec1..."></textarea>
+                  </label>
+                  <div class="form-actions">
+                    <button type="submit" class="secondary-link" :disabled="saving">Log In With NSEC</button>
+                  </div>
+                </form>
+
+                <form class="auth-inline-form" @submit.prevent="loginWithBunker()">
+                  <label>
+                    <span>Bunker URI</span>
+                    <textarea x-model="loginForm.bunkerUri" rows="4" placeholder="bunker://... or nostrconnect://..."></textarea>
+                  </label>
+                  <div class="form-actions">
+                    <button type="submit" class="secondary-link" :disabled="saving">Connect Bunker</button>
+                  </div>
+                </form>
+              </details>
             </div>
-
-            <form class="editor-panel" @submit.prevent="createLocalAccount()">
-              <h2>Create Local Nostr Account</h2>
-              <p>This creates a browser-local Nostr identity for public posting in this workspace. It matches the anonymous local signup path from Flight Deck.</p>
-              <label>
-                <span>Display name</span>
-                <input x-model="profileForm.display_name" placeholder="Your public display name" />
-              </label>
-              <label>
-                <span>Avatar URL</span>
-                <input x-model="profileForm.avatar_url" placeholder="https://..." />
-              </label>
-              <label>
-                <span>Bio</span>
-                <textarea x-model="profileForm.bio" rows="4"></textarea>
-              </label>
-              <div class="form-actions">
-                <button type="submit" class="primary-link" :disabled="saving">Create Account</button>
-              </div>
-            </form>
-
-            <form class="editor-panel" @submit.prevent="loginWithNsec()">
-              <h2>Import Existing NSEC</h2>
-              <p>Use this to log in as an existing Nostr account, including the admin account.</p>
-              <label>
-                <span>NSEC</span>
-                <textarea x-model="loginForm.nsec" rows="4" placeholder="nsec1..."></textarea>
-              </label>
-              <div class="form-actions">
-                <button type="submit" class="secondary-link" :disabled="saving">Log In</button>
-              </div>
-            </form>
-
-            <form class="editor-panel" @submit.prevent="loginWithBunker()">
-              <h2>Connect Bunker</h2>
-              <p>Log in with a remote signer via NIP-46 bunker URI.</p>
-              <label>
-                <span>Bunker URI</span>
-                <textarea x-model="loginForm.bunkerUri" rows="4" placeholder="bunker://... or nostrconnect://..."></textarea>
-              </label>
-              <div class="form-actions">
-                <button type="submit" class="secondary-link" :disabled="saving">Connect Bunker</button>
-              </div>
-            </form>
           </div>
         </section>
 
         <section x-show="route.name === 'profile'" class="page page-profile">
           <form class="editor-panel narrow" @submit.prevent="saveProfile()">
-            <h2>Your Profile</h2>
+            <span class="eyebrow">Profile</span>
+            <h2 x-text="profileEditorTitle"></h2>
+            <p class="form-caption" x-text="profileEditorCopy"></p>
             <template x-if="session">
               <div>
                 <p class="form-caption" x-text="session?.npub"></p>
@@ -361,7 +403,7 @@
               <textarea x-model="profileForm.bio" rows="5"></textarea>
             </label>
             <div class="form-actions">
-              <button type="submit" class="primary-link" :disabled="!session || saving">Save Profile</button>
+              <button type="submit" class="primary-link" :disabled="!session || saving" x-text="profileSaveLabel"></button>
             </div>
           </form>
         </section>
@@ -375,6 +417,40 @@
                   <button class="primary-link" @click="openWorkspaceEditor()">Edit Workspace</button>
                   <button class="primary-link" @click="openCreateEventModal()">Create Event</button>
                   <button class="primary-link" @click="openCreateTopicModal()">Create Topic</button>
+                </div>
+              </div>
+
+              <form class="editor-panel" @submit.prevent="grantAdminAccess()">
+                <h2>Assign Admin Access</h2>
+                <p class="form-caption">Grant workspace admin access to another Nostr identity. This is useful for delegated operators and agents acting on your behalf.</p>
+                <label>
+                  <span>Target NPUB</span>
+                  <input x-model="adminAccessForm.npub" placeholder="npub1..." />
+                </label>
+                <div class="form-actions">
+                  <button type="submit" class="primary-link" :disabled="saving">Assign Admin Access</button>
+                </div>
+                <div class="moderation-list">
+                  <template x-for="npub in adminMembers" :key="npub">
+                    <div class="moderation-item">
+                      <div>
+                        <strong x-text="authorLabel(npub)"></strong>
+                        <span class="form-caption" x-text="npub"></span>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="adminMembers.length === 0">
+                    <div class="empty-state">No admin members loaded.</div>
+                  </template>
+                </div>
+              </form>
+
+              <div class="editor-panel">
+                <h2>Agent Connect</h2>
+                <p class="form-caption">Open the live agent instructions or the structured connection package in a modal when you need to hand this workspace off to an agent.</p>
+                <div class="form-actions">
+                  <button type="button" class="secondary-link" @click="openAgentConnectModal('instructions')">Instructions</button>
+                  <button type="button" class="secondary-link" @click="openAgentConnectModal('package')">Package JSON</button>
                 </div>
               </div>
 
@@ -409,12 +485,13 @@
                         <strong x-text="event.title"></strong>
                         <span x-text="formatEventDateRange(event)"></span>
                       </div>
-                      <div class="inline-actions">
-                        <button @click="editEvent(event.record_id)">Edit</button>
-                        <button @click="go(eventUrl(event))">Open</button>
-                      </div>
-                    </div>
-                  </template>
+	                      <div class="inline-actions">
+	                        <button @click="editEvent(event.record_id)">Edit</button>
+	                        <button @click="go(eventUrl(event))">Open</button>
+	                        <button @click="deleteEvent(event.record_id)">Delete</button>
+	                      </div>
+	                    </div>
+	                  </template>
                 </div>
               </div>
             </div>
@@ -490,10 +567,13 @@
                 <option value="deleted">Deleted</option>
               </select>
             </label>
-            <div class="form-actions">
-              <button type="submit" class="primary-link" :disabled="saving">Save Event</button>
-              <button type="button" class="secondary-link" @click="resetEventForm()">Reset</button>
-            </div>
+	            <div class="form-actions">
+	              <button type="submit" class="primary-link" :disabled="saving">Save Event</button>
+	              <button type="button" class="secondary-link" @click="resetEventForm()">Reset</button>
+	              <template x-if="eventForm.record_id">
+	                <button type="button" class="secondary-link" @click="deleteEvent(eventForm.record_id)">Delete Event</button>
+	              </template>
+	            </div>
             <template x-if="eventFeedback">
               <p class="form-feedback" :class="`is-${eventFeedbackTone}`" x-text="eventFeedback"></p>
             </template>
@@ -539,6 +619,36 @@
               <button type="button" class="secondary-link" @click="resetTopicForm()">Reset</button>
             </div>
           </form>
+        </div>
+
+        <div class="modal-backdrop" x-show="modals.agentConnect" x-transition.opacity @click.self="closeModal('agentConnect')">
+          <div class="editor-panel modal-panel">
+            <div class="modal-head">
+              <h2 x-text="agentConnectModalTitle"></h2>
+              <button type="button" class="secondary-link" @click="closeModal('agentConnect')">Close</button>
+            </div>
+            <p class="form-caption">This content is generated from the live workspace configuration and current deployment values.</p>
+            <label>
+              <span x-text="agentConnectView === 'package' ? 'Structured package' : 'Human-readable instructions'"></span>
+              <textarea rows="18" readonly :value="agentConnectModalContent"></textarea>
+            </label>
+            <div class="form-actions">
+              <button
+                type="button"
+                class="secondary-link"
+                x-show="agentConnectView === 'instructions'"
+                @click="copyAgentInstructions()"
+                x-text="agentConnectCopied ? 'Copied' : 'Copy Instructions'"
+              ></button>
+              <button
+                type="button"
+                class="secondary-link"
+                x-show="agentConnectView === 'package'"
+                @click="copyAgentPackage()"
+                x-text="agentPackageCopied ? 'Copied' : 'Copy Package JSON'"
+              ></button>
+            </div>
+          </div>
         </div>
       </main>
     </div>

@@ -80,6 +80,14 @@ export async function getMemberGroups(auth: AuthContext): Promise<GroupListEntry
   return data.groups || [];
 }
 
+export async function addGroupMember(
+  auth: AuthContext,
+  groupId: string,
+  body: { member_npub: string; wrapped_group_nsec: string; wrapped_by_npub: string },
+) {
+  return signedJson(`/api/v4/groups/${groupId}/members`, "POST", auth, body);
+}
+
 export async function prepareStorageObject(auth: AuthContext, body: Record<string, unknown>): Promise<StoragePrepared> {
   return signedJson<StoragePrepared>("/api/v4/storage/prepare", "POST", auth, body);
 }

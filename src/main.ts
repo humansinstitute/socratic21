@@ -6,19 +6,22 @@ import {
   createNip98AuthHeaderForSecret,
   createLocalIdentity,
   decodeNsec,
+  decodeNpub,
   hasExtensionSigner,
   identityFromBunker,
   identityFromExtension,
   identityFromNsec,
   loadSession,
   methodLabel,
+  personalEncryptForNpub,
   personalDecryptFromNpub,
   saveSession,
   clearSession,
   waitForExtensionSigner,
 } from "./lib/auth";
 import { db } from "./lib/db";
-import { completeStorageObject, fetchFamilyRecords, getMemberGroups, getWrappedGroupKeys, prepareStorageObject, syncSingleRecord, uploadStorageObject, type AuthContext } from "./lib/api";
+import { addGroupMember, completeStorageObject, fetchFamilyRecords, getMemberGroups, getWrappedGroupKeys, prepareStorageObject, syncSingleRecord, uploadStorageObject, type AuthContext } from "./lib/api";
+import { buildAgentConnectPackage, buildAgentInstructionText } from "./lib/agent-connect";
 import { fetchNostrProfilesByNpub } from "./lib/nostr";
 import {
   PUBLIC_GROUP_SECRET,
@@ -147,12 +150,14 @@ function perthAiApp(): StoreShape {
     error: "",
     notice: "",
     accountMenuOpen: false,
-    modals: {
-      submitTopic: false,
-      workspace: false,
-      event: false,
-      topic: false,
-    },
+    eventTab: "about" as "about" | "topics",
+	    modals: {
+	      submitTopic: false,
+	      workspace: false,
+	      event: false,
+	      topic: false,
+	      agentConnect: false,
+	    },
     session: null as SessionIdentity | null,
     isAdmin: false,
     workspaceProfile: null as WorkspaceProfile | null,
@@ -165,10 +170,18 @@ function perthAiApp(): StoreShape {
     _groupSecrets: [PUBLIC_GROUP_SECRET] as GroupSecret[],
     refreshHandle: 0 as number,
     extensionSignerAvailable: false,
-    loginForm: {
-      nsec: "",
-      bunkerUri: "",
-    },
+	    loginForm: {
+	      nsec: "",
+	      bunkerUri: "",
+	    },
+	    adminAccessForm: {
+	      npub: "",
+	    },
+	    meetupUrl: env.meetupUrl,
+	    topicActionMenuId: "",
+	    agentConnectView: "instructions" as "instructions" | "package",
+	    agentConnectCopied: false,
+	    agentPackageCopied: false,
     profileForm: {
       display_name: "",
       avatar_url: "",
@@ -214,25 +227,27 @@ function perthAiApp(): StoreShape {
       body: "",
     },
 
-    async init() {
+	    async init() {
       this.loading = true;
       this.session = loadSession();
       this.loadProfileCacheFromStorage();
       await this.loadProfileCacheFromDb();
       this.seedFormsFromSession();
       await this.refreshExtensionSignerAvailability();
-      window.addEventListener("popstate", () => {
-        this.route = parseRoute();
-        this.accountMenuOpen = false;
-        this.closeAllModals();
-        this.clearNotice();
-      });
+	      window.addEventListener("popstate", () => {
+	        this.route = parseRoute();
+	        this.accountMenuOpen = false;
+	        this.closeAllModals();
+	        this.clearNotice();
+	        this.syncRouteContextFromLocation();
+	      });
       window.addEventListener("focus", () => {
         this.refreshExtensionSignerAvailability().catch(() => undefined);
       });
-      await this.reloadFromDb();
-      await this.refreshAll();
-      this.refreshHandle = window.setInterval(() => {
+	      await this.reloadFromDb();
+	      await this.refreshAll();
+	      this.syncRouteContextFromLocation();
+	      this.refreshHandle = window.setInterval(() => {
         this.refreshAll().catch((error) => {
           console.error(error);
         });
@@ -418,28 +433,88 @@ function perthAiApp(): StoreShape {
       this.workspaceForm.hero_image_url = workspace?.hero_image_url || "";
     },
 
-    go(path: string) {
-      window.history.pushState({}, "", path);
-      this.route = parseRoute(path);
-      this.accountMenuOpen = false;
-      this.closeAllModals();
-      this.clearNotice();
-    },
+	    go(path: string) {
+	      window.history.pushState({}, "", path);
+	      this.route = parseRoute(path);
+	      this.accountMenuOpen = false;
+	      this.topicActionMenuId = "";
+	      this.closeAllModals();
+	      this.clearNotice();
+	      this.syncRouteContextFromLocation();
+	    },
 
-    openModal(name: "submitTopic" | "workspace" | "event" | "topic") {
-      this.modals[name] = true;
-    },
+	    openModal(name: "submitTopic" | "workspace" | "event" | "topic" | "agentConnect") {
+	      this.modals[name] = true;
+	    },
 
-    closeModal(name: "submitTopic" | "workspace" | "event" | "topic") {
-      this.modals[name] = false;
-    },
+	    closeModal(name: "submitTopic" | "workspace" | "event" | "topic" | "agentConnect") {
+	      this.modals[name] = false;
+	    },
 
-    closeAllModals() {
-      this.modals.submitTopic = false;
-      this.modals.workspace = false;
-      this.modals.event = false;
-      this.modals.topic = false;
-    },
+	    closeAllModals() {
+	      this.modals.submitTopic = false;
+	      this.modals.workspace = false;
+	      this.modals.event = false;
+	      this.modals.topic = false;
+	      this.modals.agentConnect = false;
+	      this.topicActionMenuId = "";
+	    },
+
+	    setEventTab(tab: "about" | "topics") {
+	      this.eventTab = tab;
+	      if (tab === "about" && this.route.name === "event" && this.currentEvent) {
+	        window.history.replaceState(window.history.state ?? {}, "", this.eventUrl(this.currentEvent));
+	      }
+	    },
+
+	    topicAnchorId(topic: TopicRecord | null) {
+	      return topic?.slug ? `topic-${topic.slug}` : "";
+	    },
+
+	    topicAnchorFromHash() {
+	      const value = decodeURIComponent(String(window.location.hash || "").replace(/^#/, "").trim());
+	      return value.startsWith("topic-") ? value : "";
+	    },
+
+	    eventUrlForTopicAnchor(topic: TopicRecord) {
+	      const event = this.events.find((entry) => entry.record_id === topic.event_id);
+	      const anchorId = this.topicAnchorId(topic);
+	      if (!event || !anchorId) return "";
+	      return `${this.eventUrl(event)}#${anchorId}`;
+	    },
+
+	    scrollToTopicAnchor(anchorId: string) {
+	      if (!anchorId) return;
+	      window.requestAnimationFrame(() => {
+	        window.requestAnimationFrame(() => {
+	          const target = document.getElementById(anchorId);
+	          if (!target) return;
+	          target.scrollIntoView({ block: "start", behavior: "auto" });
+	        });
+	      });
+	    },
+
+	    syncRouteContextFromLocation() {
+	      if (this.route.name !== "event") {
+	        this.eventTab = "about";
+	        return;
+	      }
+	      const anchorId = this.topicAnchorFromHash();
+	      if (!anchorId) {
+	        this.eventTab = "about";
+	        return;
+	      }
+	      this.eventTab = "topics";
+	      this.scrollToTopicAnchor(anchorId);
+	    },
+
+	    toggleTopicActionMenu(recordId: string) {
+	      this.topicActionMenuId = this.topicActionMenuId === recordId ? "" : recordId;
+	    },
+
+	    closeTopicActionMenu() {
+	      this.topicActionMenuId = "";
+	    },
 
     toggleAccountMenu() {
       this.accountMenuOpen = !this.accountMenuOpen;
@@ -475,7 +550,7 @@ function perthAiApp(): StoreShape {
 
     get heroStyle() {
       const imageUrl = this.workspaceProfile?.hero_image_url || "/perth-ai-roundtable.png";
-      return `background-image: linear-gradient(180deg, rgba(8,18,34,.12), rgba(8,18,34,.48)), url('${imageUrl}');`;
+      return `background-image: url('${imageUrl}');`;
     },
 
     get allEventsSorted() {
@@ -552,6 +627,25 @@ function perthAiApp(): StoreShape {
 
     get sessionMethodName() {
       return this.session ? methodLabel(this.session.method) : "";
+    },
+
+    get hasPublishedProfile() {
+      if (!this.session) return false;
+      return Boolean(this.profileByNpub(this.session.npub));
+    },
+
+    get profileEditorTitle() {
+      return this.hasPublishedProfile ? "Your Profile" : "Create Your Profile";
+    },
+
+    get profileEditorCopy() {
+      return this.hasPublishedProfile
+        ? "Update your public profile for this workspace and the wider Nostr identity cache."
+        : "Your browser key is ready. Add your public details, then publish your profile so other people can recognize you.";
+    },
+
+    get profileSaveLabel() {
+      return this.hasPublishedProfile ? "Save Profile" : "Create Profile";
     },
 
     get avatarUrl() {
@@ -692,12 +786,20 @@ function perthAiApp(): StoreShape {
       return event?.hero_image_url || this.workspaceProfile?.hero_image_url || "/perth-ai-roundtable.png";
     },
 
-    topicUrlForRecord(topic: TopicRecord) {
-      const event = this.events.find((entry) => entry.record_id === topic.event_id);
-      return event ? `/events/${event.slug}/topics/${topic.slug}` : "/";
-    },
+	    topicUrlForRecord(topic: TopicRecord) {
+	      const event = this.events.find((entry) => entry.record_id === topic.event_id);
+	      return event ? `/events/${event.slug}/topics/${topic.slug}` : "/";
+	    },
 
-    visibleTopicsForEvent(eventId: string) {
+	    openTopicFromCard(topic: TopicRecord) {
+	      const returnUrl = this.eventUrlForTopicAnchor(topic);
+	      if (returnUrl) {
+	        window.history.replaceState(window.history.state ?? {}, "", returnUrl);
+	      }
+	      this.go(this.topicUrlForRecord(topic));
+	    },
+
+	    visibleTopicsForEvent(eventId: string) {
       return this.topics
         .filter((topic) => topic.event_id === eventId)
         .filter((topic) => this.isAdmin || topic.state === "published" || topic.state === "archived")
@@ -781,10 +883,14 @@ function perthAiApp(): StoreShape {
       try {
         this.session = createLocalIdentity();
         saveSession(this.session);
-        await this.saveProfile();
-        await this.refreshMemberAccess();
-        this.notice = "Local account created.";
+        this.profileForm.display_name = "";
+        this.profileForm.avatar_url = "";
+        this.profileForm.bio = "";
+        await this.refreshAll();
+        this.notice = "Key created. Complete your profile to publish it.";
         this.go("/profile");
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : String(error);
       } finally {
         this.saving = false;
       }
@@ -857,6 +963,32 @@ function perthAiApp(): StoreShape {
       return this._groupSecrets.find((group) => group.groupId === adminGroup.id) || null;
     },
 
+    currentAdminGroupEntry() {
+      return this.memberGroups.find((group) => group.group_kind === "workspace_admin") || null;
+    },
+
+    get adminMembers() {
+      const group = this.currentAdminGroupEntry();
+      if (!group) return [];
+      return [...new Set((group.members || []).map((value) => String(value || "").trim()).filter(Boolean))].sort();
+    },
+
+    get agentInstructionText() {
+      return buildAgentInstructionText(window.location.origin);
+    },
+
+	    get agentConnectPackageJson() {
+	      return JSON.stringify(buildAgentConnectPackage(window.location.origin), null, 2);
+	    },
+
+	    get agentConnectModalTitle() {
+	      return this.agentConnectView === "package" ? "Agent Connect Package" : "Agent Connect Instructions";
+	    },
+
+	    get agentConnectModalContent() {
+	      return this.agentConnectView === "package" ? this.agentConnectPackageJson : this.agentInstructionText;
+	    },
+
     buildWorkspaceSigner() {
       if (!env.workspaceOwnerNsec) throw new Error("Workspace owner key unavailable.");
       return identityFromNsec(env.workspaceOwnerNsec);
@@ -899,6 +1031,71 @@ function perthAiApp(): StoreShape {
         this.error = error instanceof Error ? error.message : String(error);
       } finally {
         this.saving = false;
+      }
+    },
+
+	    async grantAdminAccess() {
+      if (!this.isAdmin || !this.session) {
+        this.error = "Admin login required.";
+        return;
+      }
+
+      this.saving = true;
+      this.clearNotice();
+      try {
+        const targetNpub = String(this.adminAccessForm.npub || "").trim();
+        decodeNpub(targetNpub);
+
+        const adminGroup = this.currentAdminGroupSecret();
+        const adminGroupEntry = this.currentAdminGroupEntry();
+        if (!adminGroup || !adminGroupEntry) throw new Error("Admin group key unavailable.");
+        if (this.adminMembers.includes(targetNpub)) throw new Error("That npub already has admin access.");
+
+        const wrapped_group_nsec = await personalEncryptForNpub(this.session, targetNpub, adminGroup.nsec);
+        await addGroupMember(authFromIdentity(this.session), adminGroupEntry.id, {
+          member_npub: targetNpub,
+          wrapped_group_nsec,
+          wrapped_by_npub: this.session.npub,
+        });
+
+        this.adminAccessForm.npub = "";
+        await this.refreshMemberAccess();
+        this.notice = "Admin access granted.";
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : String(error);
+      } finally {
+        this.saving = false;
+      }
+	    },
+
+	    openAgentConnectModal(view: "instructions" | "package") {
+	      this.agentConnectView = view;
+	      this.agentConnectCopied = false;
+	      this.agentPackageCopied = false;
+	      this.openModal("agentConnect");
+	    },
+
+    async copyAgentInstructions() {
+      try {
+        await navigator.clipboard.writeText(this.agentInstructionText);
+        this.agentConnectCopied = true;
+        window.setTimeout(() => {
+          this.agentConnectCopied = false;
+        }, 1800);
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : String(error);
+      }
+    },
+
+    async copyAgentPackage() {
+      try {
+        await navigator.clipboard.writeText(this.agentConnectPackageJson);
+        this.agentPackageCopied = true;
+        window.setTimeout(() => {
+          this.agentPackageCopied = false;
+        }, 1800);
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : String(error);
       }
     },
 
@@ -982,9 +1179,9 @@ function perthAiApp(): StoreShape {
       }
     },
 
-    editEvent(recordId: string) {
-      const event = this.events.find((row) => row.record_id === recordId);
-      if (!event) return;
+	    editEvent(recordId: string) {
+	      const event = this.events.find((row) => row.record_id === recordId);
+	      if (!event) return;
       this.eventFeedback = "";
       this.eventFeedbackTone = "idle";
       this.eventForm.record_id = event.record_id;
@@ -996,24 +1193,26 @@ function perthAiApp(): StoreShape {
       this.eventForm.ends_at = formatDateInput(event.ends_at);
       this.eventForm.timezone = event.timezone;
       this.eventForm.venue_name = event.venue_name;
-      this.eventForm.venue_address = event.venue_address;
-      this.eventForm.external_url = event.external_url;
-      this.eventForm.hero_image_url = event.hero_image_url;
-      this.eventForm.state = event.state;
-      this.openModal("event");
-    },
+	      this.eventForm.venue_address = event.venue_address;
+	      this.eventForm.external_url = event.external_url;
+	      this.eventForm.hero_image_url = event.hero_image_url;
+	      this.eventForm.state = event.state;
+	      this.topicActionMenuId = "";
+	      this.openModal("event");
+	    },
 
-    editTopic(recordId: string) {
-      const topic = this.topics.find((row) => row.record_id === recordId);
-      if (!topic) return;
-      this.topicForm.record_id = topic.record_id;
+	    editTopic(recordId: string) {
+	      const topic = this.topics.find((row) => row.record_id === recordId);
+	      if (!topic) return;
+	      this.topicActionMenuId = "";
+	      this.topicForm.record_id = topic.record_id;
       this.topicForm.event_id = topic.event_id;
       this.topicForm.slug = topic.slug;
       this.topicForm.title = topic.title;
       this.topicForm.description_markdown = topic.description_markdown;
       this.topicForm.state = topic.state;
-      this.openModal("topic");
-    },
+	      this.openModal("topic");
+	    },
 
     resetTopicForm() {
       this.topicForm = {
@@ -1069,23 +1268,53 @@ function perthAiApp(): StoreShape {
       }
     },
 
-    async setTopicState(recordId: string, state: TopicRecord["state"]) {
-      const topic = this.topics.find((row) => row.record_id === recordId);
-      if (!topic) return;
-      this.topicForm.record_id = topic.record_id;
+	    async setTopicState(recordId: string, state: TopicRecord["state"]) {
+	      const topic = this.topics.find((row) => row.record_id === recordId);
+	      if (!topic) return;
+	      this.topicActionMenuId = "";
+	      this.topicForm.record_id = topic.record_id;
       this.topicForm.event_id = topic.event_id;
       this.topicForm.slug = topic.slug;
       this.topicForm.title = topic.title;
       this.topicForm.description_markdown = topic.description_markdown;
       this.topicForm.state = state;
-      await this.saveTopic();
-    },
+	      await this.saveTopic();
+	    },
 
-    async moveTopic(recordId: string, direction: number) {
-      if (!this.isAdmin || !this.session) return;
-      const topic = this.topics.find((row) => row.record_id === recordId);
-      if (!topic) return;
-      const siblings = this.visibleTopicsForEvent(topic.event_id);
+	    async setEventState(recordId: string, state: EventRecord["state"]) {
+	      const event = this.events.find((row) => row.record_id === recordId);
+	      if (!event) return;
+	      this.eventFeedback = "";
+	      this.eventFeedbackTone = "idle";
+	      this.eventForm.record_id = event.record_id;
+	      this.eventForm.title = event.title;
+	      this.eventForm.slug = event.slug;
+	      this.eventForm.summary = event.summary;
+	      this.eventForm.description = event.description;
+	      this.eventForm.starts_at = formatDateInput(event.starts_at);
+	      this.eventForm.ends_at = formatDateInput(event.ends_at);
+	      this.eventForm.timezone = event.timezone;
+	      this.eventForm.venue_name = event.venue_name;
+	      this.eventForm.venue_address = event.venue_address;
+	      this.eventForm.external_url = event.external_url;
+	      this.eventForm.hero_image_url = event.hero_image_url;
+	      this.eventForm.state = state;
+	      await this.saveEvent();
+	    },
+
+	    async deleteEvent(recordId: string) {
+	      const event = this.events.find((row) => row.record_id === recordId);
+	      if (!event) return;
+	      if (!window.confirm(`Delete event \"${event.title}\"?`)) return;
+	      await this.setEventState(recordId, "deleted");
+	    },
+
+	    async moveTopic(recordId: string, direction: number) {
+	      if (!this.isAdmin || !this.session) return;
+	      const topic = this.topics.find((row) => row.record_id === recordId);
+	      if (!topic) return;
+	      this.topicActionMenuId = "";
+	      const siblings = this.visibleTopicsForEvent(topic.event_id);
       const index = siblings.findIndex((row) => row.record_id === recordId);
       const swap = siblings[index + direction];
       if (!swap) return;

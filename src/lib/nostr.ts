@@ -4,7 +4,6 @@ import type { CachedProfile } from "./types";
 const KIND_METADATA = 0;
 const PROFILE_FETCH_TIMEOUT_MS = 2_500;
 const DEFAULT_PROFILE_RELAYS = [
-  "wss://relay.damus.io",
   "wss://nos.lol",
   "wss://relay.primal.net",
   "wss://purplepag.es",

@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+Agent-Connect: /llms.txt
+LLM: /llms.txt

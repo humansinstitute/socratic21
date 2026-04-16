@@ -1,0 +1,75 @@
+# ${WORKSPACE_EFFECTIVE_NAME} llms.txt
+
+This deployment is a workspace-scoped app built on SuperBased / Tower v4 groups and append-only versioned records.
+
+## Purpose
+
+${WORKSPACE_EFFECTIVE_NAME} is a public roundtable app for events, topics, comments, and participant profiles.
+
+## Backend
+
+- Backend URL: ${BACKEND_EFFECTIVE_URL}
+- OpenAPI: ${BACKEND_EFFECTIVE_URL}/openapi.json
+- Docs: ${BACKEND_EFFECTIVE_URL}/docs
+- Health: ${BACKEND_EFFECTIVE_URL}/health
+
+## Workspace identities
+
+- Workspace name: ${WORKSPACE_EFFECTIVE_NAME}
+- Workspace slug: ${WORKSPACE_EFFECTIVE_SLUG}
+- Workspace owner npub: ${WORKSPACE_EFFECTIVE_OWNER_NPUB}
+- App npub: ${APP_EFFECTIVE_NPUB}
+- Public group id: ${PUBLIC_EFFECTIVE_GROUP_ID}
+- Public group npub: ${PUBLIC_EFFECTIVE_GROUP_NPUB}
+
+## Data model
+
+This app uses SuperBased/Tower v4 records.
+
+- Records are append-only and versioned.
+- The tenancy boundary is `owner_npub = ${WORKSPACE_EFFECTIVE_OWNER_NPUB}`.
+- Record families are namespaced by the app npub.
+
+### Record families
+
+- workspace_profile: ${APP_EFFECTIVE_NPUB}:workspace_profile
+- event: ${APP_EFFECTIVE_NPUB}:event
+- topic: ${APP_EFFECTIVE_NPUB}:topic
+- comment: ${APP_EFFECTIVE_NPUB}:comment
+- profile: ${APP_EFFECTIVE_NPUB}:profile
+
+### Typical record id patterns
+
+- workspace profile: `workspace_profile:${WORKSPACE_EFFECTIVE_OWNER_NPUB}`
+- event: `event:<uuid>`
+- topic: `topic:<uuid>`
+- comment: `comment:<uuid>`
+- profile: `profile:<author_npub>`
+
+## Record purposes
+
+- `workspace_profile`: workspace title, summary, description, hero image
+- `event`: event slug, title, summary, body, timing, venue, hero image, state
+- `topic`: event topic proposals and published discussion topics
+- `comment`: comments on topics
+- `profile`: public participant profile for authorship display
+
+## Access model
+
+- Public reads and public posting use the public group.
+- Protected admin writes require membership in the `workspace_admin` group.
+- Admin membership is granted by an existing admin who wraps the admin group key for the target npub.
+
+## Agent guidance
+
+1. Read this `llms.txt` first.
+2. Use the backend URL above for SuperBased/Tower v4 requests.
+3. Scope record pulls and sync writes with `owner_npub = ${WORKSPACE_EFFECTIVE_OWNER_NPUB}`.
+4. Use the record family hashes listed above exactly.
+5. If you need admin powers, request the workspace operator to grant your npub admin access from the site admin panel.
+6. After admin access is granted, refresh wrapped group keys and decrypt your admin group key before attempting protected writes.
+
+## Notes
+
+- If an admin is present, the site admin panel can emit a richer agent-connect package and human-readable instructions with the live connection token for this workspace.
+- This app is not a generic CRUD surface. Use the record families and payload purposes above.
