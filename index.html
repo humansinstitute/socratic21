@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Perth AI</title>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <div id="app" x-data="perthAiApp()" x-init="init()" class="app-shell">
+      <header class="site-header">
+        <div class="site-header-inner">
+          <div class="brand-lockup">
+            <button class="brand-button" @click.prevent="go('/')">
+              <span class="brand-overline">Other Stuff / Socratic Seminars</span>
+              <span class="brand-title" x-text="workspaceDisplayName"></span>
+            </button>
+          </div>
+          <nav class="site-nav">
+            <template x-if="!session">
+              <button class="nav-action" @click="go('/login')">Log In</button>
+            </template>
+            <template x-if="session">
+              <div class="account-menu" @click.outside="closeAccountMenu()">
+                <button class="avatar-button" @click="toggleAccountMenu()">
+                  <template x-if="avatarUrl">
+                    <img class="avatar-image" :src="avatarUrl" alt="" />
+                  </template>
+                  <template x-if="!avatarUrl">
+                    <span class="avatar-fallback" x-text="avatarFallback"></span>
+                  </template>
+                  <span class="avatar-meta">
+                    <strong x-text="sessionProfileName"></strong>
+                    <small x-text="sessionMethodName"></small>
+                  </span>
+                </button>
+                <div class="account-dropdown" x-show="accountMenuOpen" x-transition.opacity.origin.top.right>
+                  <button @click="go('/')">Home</button>
+                  <button @click="go('/profile')">Profile</button>
+                  <template x-if="isAdmin">
+                    <button @click="go('/admin')">Admin</button>
+                  </template>
+                  <button @click="logout()">Log Out</button>
+                </div>
+              </div>
+            </template>
+          </nav>
+        </div>
+      </header>
+
+      <main class="site-main">
+        <template x-if="error">
+          <div class="banner banner-error" x-text="error"></div>
+        </template>
+        <template x-if="notice">
+          <div class="banner banner-notice" x-text="notice"></div>
+        </template>
+
+        <section x-show="route.name === 'home'" class="page page-home">
+          <section class="hero-stage hero-stage-large" :style="heroStyle">
+            <div class="hero-stage-overlay">
+              <span class="eyebrow bright">Socratic Seminars</span>
+              <h1 x-text="workspaceTitle"></h1>
+              <p class="hero-stage-copy" x-text="workspaceSummary"></p>
+            </div>
+          </section>
+
+          <div class="main-flow">
+            <section class="content-block home-section">
+              <div class="section-heading">
+                <h2>Next Events</h2>
+                <p>The next sessions coming up for the roundtable.</p>
+              </div>
+              <div class="stack-list">
+                <template x-for="event in heroUpcomingEvents" :key="event.record_id">
+                  <button class="stack-item" @click.prevent="go(eventUrl(event))">
+                    <h3 x-text="event.title"></h3>
+                    <p x-text="event.summary || event.description || 'No summary yet.'"></p>
+                    <div class="stack-meta">
+                      <span x-text="formatEventDateRange(event)"></span>
+                      <span x-text="event.venue_name || 'Venue TBC'"></span>
+                    </div>
+                  </button>
+                </template>
+                <template x-if="heroUpcomingEvents.length === 0">
+                  <div class="empty-state">No published events yet.</div>
+                </template>
+              </div>
+            </section>
+
+            <section class="content-block home-section">
+              <div class="section-heading">
+                <span class="eyebrow">About</span>
+                <h2 x-text="workspaceTitle"></h2>
+              </div>
+              <div class="markdown-body" x-html="workspaceDescriptionHtml"></div>
+            </section>
+
+            <section class="content-block home-section archive-block">
+              <div class="section-heading">
+                <h2>Archive</h2>
+                <p>Past sessions remain visible once they roll out of the upcoming list.</p>
+              </div>
+              <div class="archive-list">
+                <template x-for="event in archivedPublicEvents" :key="event.record_id">
+                  <button class="archive-item" @click.prevent="go(eventUrl(event))">
+                    <span x-text="event.title"></span>
+                    <span x-text="formatEventDateRange(event)"></span>
+                  </button>
+                </template>
+                <template x-if="archivedPublicEvents.length === 0">
+                  <div class="empty-state">Archive will appear here after the first sessions pass.</div>
+                </template>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section x-show="route.name === 'event'" class="page page-event">
+          <template x-if="currentEvent">
+            <div class="event-layout">
+              <section class="event-hero-panel">
+                <div class="event-hero-copy">
+                  <span class="eyebrow">Event</span>
+                  <h1 x-text="currentEvent?.title"></h1>
+                  <p class="lede" x-text="currentEvent?.summary || currentEvent?.description"></p>
+                  <div class="event-detail-list">
+                    <div>
+                      <strong>When</strong>
+                      <span x-text="formatEventDateRange(currentEvent)"></span>
+                    </div>
+                    <div>
+                      <strong>Where</strong>
+                      <span x-text="currentEvent?.venue_name || 'Venue TBC'"></span>
+                    </div>
+                    <template x-if="currentEvent?.venue_address">
+                      <div>
+                        <strong>Address</strong>
+                        <span x-text="currentEvent?.venue_address"></span>
+                      </div>
+                    </template>
+                  </div>
+                  <template x-if="currentEvent?.external_url">
+                    <a class="primary-link" :href="currentEvent.external_url" target="_blank" rel="noreferrer">Open Meetup</a>
+                  </template>
+                </div>
+                <div class="event-hero-image" :style="`background-image: linear-gradient(180deg, rgba(8,18,34,.08), rgba(8,18,34,.34)), url('${eventImageUrl(currentEvent)}');`"></div>
+              </section>
+
+              <section class="content-block">
+                <div class="markdown-body" x-html="renderMarkdown(currentEvent?.description || '')"></div>
+              </section>
+
+              <section class="content-block">
+                <div class="section-heading compact">
+                  <h2>Topics</h2>
+                  <template x-if="session">
+                    <button class="secondary-link" @click="openTopicSubmission(currentEvent?.record_id || '')">Submit Topic</button>
+                  </template>
+                </div>
+
+                <div class="topic-list">
+                  <template x-for="topic in visibleTopicsForEvent(currentEvent?.record_id || '')" :key="topic.record_id">
+                    <article class="topic-card topic-card-prominent">
+                      <div class="topic-card-head">
+                        <div>
+                          <span class="card-meta" x-text="displayTopicState(topic)"></span>
+                          <h3 x-text="topic.title"></h3>
+                        </div>
+                        <template x-if="isAdmin">
+                          <div class="topic-admin-actions">
+                            <button @click="moveTopic(topic.record_id, -1)">Up</button>
+                            <button @click="moveTopic(topic.record_id, 1)">Down</button>
+                            <button @click="editTopic(topic.record_id)">Edit</button>
+                          </div>
+                        </template>
+                      </div>
+                      <div class="topic-card-body">
+                        <p x-text="topic.description_excerpt || excerpt(topic.description_markdown)"></p>
+                      </div>
+                      <div class="topic-card-foot">
+                        <div class="author-chip">
+                          <template x-if="authorAvatar(topic.author_npub)">
+                            <img class="author-avatar" :src="authorAvatar(topic.author_npub)" alt="" />
+                          </template>
+                          <template x-if="!authorAvatar(topic.author_npub)">
+                            <span class="author-avatar author-avatar-fallback" x-text="authorFallback(topic.author_npub)"></span>
+                          </template>
+                          <span x-text="authorLabel(topic.author_npub)"></span>
+                        </div>
+                        <button class="card-link-inline" @click.prevent="go(topicUrlForRecord(topic))">Open Topic</button>
+                      </div>
+                    </article>
+                  </template>
+                  <template x-if="visibleTopicsForEvent(currentEvent?.record_id || '').length === 0">
+                    <div class="empty-state">No topics published for this event yet.</div>
+                  </template>
+                </div>
+              </section>
+
+            </div>
+          </template>
+        </section>
+
+        <section x-show="route.name === 'topic'" class="page page-topic">
+          <template x-if="currentTopic">
+            <div class="topic-layout">
+              <section class="content-block topic-hero-block">
+                <div class="section-heading">
+                  <span class="eyebrow">Topic</span>
+                  <h1 x-text="currentTopic?.title"></h1>
+                  <p x-text="authorLabel(currentTopic?.author_npub || '')"></p>
+                </div>
+                <div class="markdown-body" x-html="renderMarkdown(currentTopic?.description_markdown || '')"></div>
+              </section>
+
+              <template x-if="isAdmin">
+                <div class="admin-inline-panel">
+                  <span class="admin-inline-label">Admin controls</span>
+                  <div class="inline-actions">
+                    <button @click="setTopicState(currentTopic?.record_id || '', 'published')">Publish</button>
+                    <button @click="setTopicState(currentTopic?.record_id || '', 'hidden')">Hide</button>
+                    <button @click="setTopicState(currentTopic?.record_id || '', 'archived')">Archive</button>
+                    <button @click="setTopicState(currentTopic?.record_id || '', 'deleted')">Delete</button>
+                    <button @click="editTopic(currentTopic?.record_id || '')">Edit</button>
+                  </div>
+                </div>
+              </template>
+
+              <section class="content-block comments-block">
+                <div class="section-heading compact">
+                  <h2>Comments</h2>
+                </div>
+                <div class="comment-list">
+                  <template x-for="comment in visibleCommentsForTopic(currentTopic?.record_id || '')" :key="comment.record_id">
+                    <article class="comment-card comment-card-plain">
+                      <div class="comment-head">
+                        <div class="author-chip">
+                          <template x-if="authorAvatar(comment.author_npub)">
+                            <img class="author-avatar" :src="authorAvatar(comment.author_npub)" alt="" />
+                          </template>
+                          <template x-if="!authorAvatar(comment.author_npub)">
+                            <span class="author-avatar author-avatar-fallback" x-text="authorFallback(comment.author_npub)"></span>
+                          </template>
+                          <div>
+                            <strong x-text="authorLabel(comment.author_npub)"></strong>
+                            <span x-text="formatTimestamp(comment.updated_at)"></span>
+                          </div>
+                        </div>
+                        <template x-if="isAdmin">
+                          <button @click="setCommentState(comment.record_id, comment.state === 'hidden' ? 'visible' : 'hidden')">
+                            <span x-text="comment.state === 'hidden' ? 'Unhide' : 'Hide'"></span>
+                          </button>
+                        </template>
+                      </div>
+                      <div class="markdown-body compact" x-html="renderMarkdown(comment.body_markdown)"></div>
+                    </article>
+                  </template>
+                  <template x-if="visibleCommentsForTopic(currentTopic?.record_id || '').length === 0">
+                    <div class="empty-state">No comments yet.</div>
+                  </template>
+                </div>
+
+                <template x-if="session">
+                  <form class="editor-panel narrow" @submit.prevent="submitComment()">
+                    <label>
+                      <span>Add comment</span>
+                      <textarea x-model="commentDraft.body" rows="5" placeholder="Share a question, challenge, or observation."></textarea>
+                    </label>
+                    <div class="form-actions">
+                      <button type="submit" class="primary-link" :disabled="saving">Post Comment</button>
+                    </div>
+                  </form>
+                </template>
+                <template x-if="!session">
+                  <div class="empty-state">Log in to join the discussion.</div>
+                </template>
+              </section>
+            </div>
+          </template>
+        </section>
+
+        <section x-show="route.name === 'login'" class="page page-login">
+          <div class="auth-grid">
+            <div class="editor-panel">
+              <h2>Use Browser Extension</h2>
+              <p>Log in with a NIP-07 browser signer, with NIP-44 support for workspace access and wrapped keys.</p>
+              <div class="auth-status-row">
+                <span class="auth-badge" :class="{ 'is-live': extensionSignerAvailable }" x-text="extensionSignerAvailable ? 'Extension detected' : 'Extension not detected'"></span>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="primary-link" :disabled="saving || !extensionSignerAvailable" @click="loginWithExtension()">Log In With Extension</button>
+              </div>
+            </div>
+
+            <form class="editor-panel" @submit.prevent="createLocalAccount()">
+              <h2>Create Local Nostr Account</h2>
+              <p>This creates a browser-local Nostr identity for public posting in this workspace. It matches the anonymous local signup path from Flight Deck.</p>
+              <label>
+                <span>Display name</span>
+                <input x-model="profileForm.display_name" placeholder="Your public display name" />
+              </label>
+              <label>
+                <span>Avatar URL</span>
+                <input x-model="profileForm.avatar_url" placeholder="https://..." />
+              </label>
+              <label>
+                <span>Bio</span>
+                <textarea x-model="profileForm.bio" rows="4"></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit" class="primary-link" :disabled="saving">Create Account</button>
+              </div>
+            </form>
+
+            <form class="editor-panel" @submit.prevent="loginWithNsec()">
+              <h2>Import Existing NSEC</h2>
+              <p>Use this to log in as an existing Nostr account, including the admin account.</p>
+              <label>
+                <span>NSEC</span>
+                <textarea x-model="loginForm.nsec" rows="4" placeholder="nsec1..."></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit" class="secondary-link" :disabled="saving">Log In</button>
+              </div>
+            </form>
+
+            <form class="editor-panel" @submit.prevent="loginWithBunker()">
+              <h2>Connect Bunker</h2>
+              <p>Log in with a remote signer via NIP-46 bunker URI.</p>
+              <label>
+                <span>Bunker URI</span>
+                <textarea x-model="loginForm.bunkerUri" rows="4" placeholder="bunker://... or nostrconnect://..."></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit" class="secondary-link" :disabled="saving">Connect Bunker</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <section x-show="route.name === 'profile'" class="page page-profile">
+          <form class="editor-panel narrow" @submit.prevent="saveProfile()">
+            <h2>Your Profile</h2>
+            <template x-if="session">
+              <div>
+                <p class="form-caption" x-text="session?.npub"></p>
+                <p class="form-caption" x-text="sessionMethodName"></p>
+              </div>
+            </template>
+            <label>
+              <span>Display name</span>
+              <input x-model="profileForm.display_name" placeholder="Your public display name" />
+            </label>
+            <label>
+              <span>Avatar URL</span>
+              <input x-model="profileForm.avatar_url" placeholder="https://..." />
+            </label>
+            <label>
+              <span>Bio</span>
+              <textarea x-model="profileForm.bio" rows="5"></textarea>
+            </label>
+            <div class="form-actions">
+              <button type="submit" class="primary-link" :disabled="!session || saving">Save Profile</button>
+            </div>
+          </form>
+        </section>
+
+        <section x-show="route.name === 'admin'" class="page page-admin">
+          <template x-if="isAdmin">
+            <div class="admin-grid">
+              <div class="editor-panel">
+                <h2>Admin Actions</h2>
+                <div class="inline-actions">
+                  <button class="primary-link" @click="openWorkspaceEditor()">Edit Workspace</button>
+                  <button class="primary-link" @click="openCreateEventModal()">Create Event</button>
+                  <button class="primary-link" @click="openCreateTopicModal()">Create Topic</button>
+                </div>
+              </div>
+
+              <div class="editor-panel">
+                <h2>Draft Queue</h2>
+                <div class="moderation-list">
+                  <template x-for="topic in draftTopics" :key="topic.record_id">
+                    <div class="moderation-item">
+                      <div>
+                        <strong x-text="topic.title"></strong>
+                        <span x-text="authorLabel(topic.author_npub)"></span>
+                      </div>
+                      <div class="inline-actions">
+                        <button @click="editTopic(topic.record_id)">Open</button>
+                        <button @click="setTopicState(topic.record_id, 'published')">Publish</button>
+                        <button @click="setTopicState(topic.record_id, 'hidden')">Hide</button>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="draftTopics.length === 0">
+                    <div class="empty-state">No draft topics waiting for review.</div>
+                  </template>
+                </div>
+              </div>
+
+              <div class="editor-panel">
+                <h2>Event List</h2>
+                <div class="moderation-list">
+                  <template x-for="event in allEventsSorted" :key="event.record_id">
+                    <div class="moderation-item">
+                      <div>
+                        <strong x-text="event.title"></strong>
+                        <span x-text="formatEventDateRange(event)"></span>
+                      </div>
+                      <div class="inline-actions">
+                        <button @click="editEvent(event.record_id)">Edit</button>
+                        <button @click="go(eventUrl(event))">Open</button>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </template>
+          <template x-if="!isAdmin">
+            <div class="empty-state">Admin access required.</div>
+          </template>
+        </section>
+        <div class="modal-backdrop" x-show="modals.submitTopic" x-transition.opacity @click.self="closeModal('submitTopic')">
+          <form class="editor-panel modal-panel" @submit.prevent="submitTopic()">
+            <div class="modal-head">
+              <h2>Submit Topic</h2>
+              <button type="button" class="secondary-link" @click="closeModal('submitTopic')">Close</button>
+            </div>
+            <p class="form-caption">New topics start in draft and appear after admin review.</p>
+            <label>
+              <span>Title</span>
+              <input x-model="topicSubmissionForm.title" placeholder="Topic title" />
+            </label>
+            <label>
+              <span>Description</span>
+              <textarea x-model="topicSubmissionForm.description_markdown" rows="7" placeholder="Use markdown for links, framing, and notes."></textarea>
+            </label>
+            <div class="form-actions">
+              <button type="submit" class="primary-link" :disabled="saving">Submit Topic</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="modal-backdrop" x-show="modals.workspace" x-transition.opacity @click.self="closeModal('workspace')">
+          <form class="editor-panel modal-panel" @submit.prevent="saveWorkspaceProfile()">
+            <div class="modal-head">
+              <h2>Edit Workspace</h2>
+              <button type="button" class="secondary-link" @click="closeModal('workspace')">Close</button>
+            </div>
+            <label><span>Title</span><input x-model="workspaceForm.title" /></label>
+            <label><span>Summary</span><textarea x-model="workspaceForm.summary" rows="3"></textarea></label>
+            <label><span>Description</span><textarea x-model="workspaceForm.description" rows="6"></textarea></label>
+            <label><span>Hero image URL</span><input x-model="workspaceForm.hero_image_url" placeholder="https://..." /></label>
+            <div class="form-actions">
+              <button type="submit" class="primary-link" :disabled="saving">Save Workspace</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="modal-backdrop" x-show="modals.event" x-transition.opacity @click.self="closeModal('event')">
+          <form class="editor-panel modal-panel" @submit.prevent="saveEvent()">
+            <div class="modal-head">
+              <h2 x-text="eventForm.record_id ? 'Edit Event' : 'Create Event'"></h2>
+              <button type="button" class="secondary-link" @click="closeModal('event')">Close</button>
+            </div>
+            <template x-if="eventForm.record_id">
+              <label><span>Record ID</span><input :value="eventForm.record_id" readonly /></label>
+            </template>
+            <label><span>Title</span><input x-model="eventForm.title" /></label>
+            <label><span>Slug</span><input x-model="eventForm.slug" placeholder="auto from title if empty" /></label>
+            <label><span>Summary</span><textarea x-model="eventForm.summary" rows="3"></textarea></label>
+            <label><span>Description</span><textarea x-model="eventForm.description" rows="8"></textarea></label>
+            <label><span>Starts at</span><input type="datetime-local" x-model="eventForm.starts_at" /></label>
+            <label><span>Ends at</span><input type="datetime-local" x-model="eventForm.ends_at" /></label>
+            <label><span>Timezone</span><input x-model="eventForm.timezone" placeholder="Australia/Perth" /></label>
+            <label><span>Venue</span><input x-model="eventForm.venue_name" /></label>
+            <label><span>Address</span><input x-model="eventForm.venue_address" /></label>
+            <label><span>External URL</span><input x-model="eventForm.external_url" /></label>
+            <label><span>Hero image URL</span><input x-model="eventForm.hero_image_url" /></label>
+            <label>
+              <span>State</span>
+              <select x-model="eventForm.state">
+                <option value="draft">Draft</option>
+                <option value="published">Published</option>
+                <option value="hidden">Hidden</option>
+                <option value="archived">Archived</option>
+                <option value="deleted">Deleted</option>
+              </select>
+            </label>
+            <div class="form-actions">
+              <button type="submit" class="primary-link" :disabled="saving">Save Event</button>
+              <button type="button" class="secondary-link" @click="resetEventForm()">Reset</button>
+            </div>
+            <template x-if="eventFeedback">
+              <p class="form-feedback" :class="`is-${eventFeedbackTone}`" x-text="eventFeedback"></p>
+            </template>
+          </form>
+        </div>
+
+        <div class="modal-backdrop" x-show="modals.topic" x-transition.opacity @click.self="closeModal('topic')">
+          <form class="editor-panel modal-panel" @submit.prevent="saveTopic()">
+            <div class="modal-head">
+              <h2 x-text="topicForm.record_id ? 'Edit Topic' : 'Create Topic'"></h2>
+              <button type="button" class="secondary-link" @click="closeModal('topic')">Close</button>
+            </div>
+            <label>
+              <span>Event</span>
+              <select x-model="topicForm.event_id">
+                <template x-for="event in allEventsSorted" :key="event.record_id">
+                  <option :value="event.record_id" x-text="event.title"></option>
+                </template>
+              </select>
+            </label>
+            <label><span>Title</span><input x-model="topicForm.title" /></label>
+            <label><span>Slug</span><input x-model="topicForm.slug" placeholder="auto from title if empty" /></label>
+            <label>
+              <span>State</span>
+              <select x-model="topicForm.state">
+                <option value="draft">Draft</option>
+                <option value="published">Published</option>
+                <option value="hidden">Hidden</option>
+                <option value="archived">Archived</option>
+                <option value="deleted">Deleted</option>
+              </select>
+            </label>
+            <label><span>Description</span><textarea x-model="topicForm.description_markdown" rows="10" @paste="handleTopicPaste($event)"></textarea></label>
+            <div class="upload-strip">
+              <label class="upload-label">
+                <span>Upload image</span>
+                <input type="file" accept="image/*" @change="uploadTopicImage($event)" />
+              </label>
+              <span class="form-caption">Admin-only. Uploaded images are inserted into the markdown editor.</span>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="primary-link" :disabled="saving">Save Topic</button>
+              <button type="button" class="secondary-link" @click="resetTopicForm()">Reset</button>
+            </div>
+          </form>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>
