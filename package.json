@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "start": "sh -c 'vite preview --host 0.0.0.0 --port ${PORT:-4173} --strictPort'",
+    "start": "vite preview --host 0.0.0.0 --port ${PORT:-4173} --strictPort",
     "build": "vite build",
     "setup": "bun install",
     "preview": "vite preview --host 0.0.0.0 --port ${PORT:-4173}",

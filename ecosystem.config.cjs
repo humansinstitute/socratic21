@@ -18,6 +18,23 @@ module.exports = {
       "autorestart": false,
       "max_restarts": 0,
       "min_uptime": "5s"
+    },
+    {
+      "name": "honest-ivory-thicket-app-socratic21",
+      "namespace": "wingman-apps",
+      "script": "bash",
+      "args": [
+        "-c",
+        "set -a; [ -f .env ] && . ./.env; set +a; export APP_ID='1e39b08c-4aff-40d2-9b21-2536cbc4f0b1' APP_LABEL='Socratic21' USER_ALIAS='honest-ivory-thicket' PORT=41002; sh -c 'vite preview --host 0.0.0.0 --port ${PORT:-4173} --strictPort'"
+      ],
+      "cwd": "/home/pw21/wingman/socratic21",
+      "out_file": "/home/pw21/wingman/socratic21/apps/logs/honest-ivory-thicket-app-socratic21-out.log",
+      "error_file": "/home/pw21/wingman/socratic21/apps/logs/honest-ivory-thicket-app-socratic21-error.log",
+      "log_date_format": "YYYY-MM-DD HH:mm:ss",
+      "merge_logs": true,
+      "autorestart": false,
+      "max_restarts": 0,
+      "min_uptime": "5s"
     }
   ]
 };
