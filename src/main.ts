@@ -27,6 +27,7 @@ import {
   PUBLIC_GROUP_SECRET,
   buildAccessibleGroups,
   buildRecordEnvelope,
+  buildRecordEnvelopeWithPersonalSigner,
   decryptRecordPayload,
   excerpt,
   inboundComment,
@@ -494,7 +495,20 @@ function perthAiApp(): StoreShape {
 	      });
 	    },
 
+	    scrollToPageTop() {
+	      window.requestAnimationFrame(() => {
+	        window.requestAnimationFrame(() => {
+	          window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+	        });
+	      });
+	    },
+
 	    syncRouteContextFromLocation() {
+	      if (this.route.name === "topic") {
+	        this.eventTab = "about";
+	        this.scrollToPageTop();
+	        return;
+	      }
 	      if (this.route.name !== "event") {
 	        this.eventTab = "about";
 	        return;
@@ -989,11 +1003,6 @@ function perthAiApp(): StoreShape {
 	      return this.agentConnectView === "package" ? this.agentConnectPackageJson : this.agentInstructionText;
 	    },
 
-    buildWorkspaceSigner() {
-      if (!env.workspaceOwnerNsec) throw new Error("Workspace owner key unavailable.");
-      return identityFromNsec(env.workspaceOwnerNsec);
-    },
-
     async saveWorkspaceProfile() {
       if (!this.isAdmin || !this.session) {
         this.error = "Admin login required.";
@@ -1004,8 +1013,7 @@ function perthAiApp(): StoreShape {
         const adminGroup = this.currentAdminGroupSecret();
         if (!adminGroup) throw new Error("Admin group key unavailable.");
         const existing = this.workspaceProfile;
-        const signer = this.buildWorkspaceSigner();
-        const record = buildRecordEnvelope("workspace_profile", {
+        const record = await buildRecordEnvelopeWithPersonalSigner("workspace_profile", {
           title: this.workspaceForm.title,
           summary: this.workspaceForm.summary,
           description: this.workspaceForm.description,
@@ -1015,7 +1023,7 @@ function perthAiApp(): StoreShape {
           author_npub: this.session.npub,
         }, {
           recordId: existing?.record_id || workspaceProfileRecordId(),
-          sender: signer,
+          sender: this.session,
           previousVersion: existing?.version || 0,
           writeGroupId: adminGroup.groupId,
           payloadGroups: [
@@ -1136,7 +1144,7 @@ function perthAiApp(): StoreShape {
         const existing = this.events.find((row) => row.record_id === recordId);
         const rowCount = this.events.length;
         const slug = this.eventForm.slug || slugify(this.eventForm.title);
-        const record = buildRecordEnvelope("event", {
+        const record = await buildRecordEnvelopeWithPersonalSigner("event", {
           slug,
           title: this.eventForm.title,
           summary: this.eventForm.summary,
@@ -1153,7 +1161,7 @@ function perthAiApp(): StoreShape {
           author_npub: this.session.npub,
         }, {
           recordId,
-          sender: this.buildWorkspaceSigner(),
+          sender: this.session,
           previousVersion: existing?.version || 0,
           writeGroupId: adminGroup.groupId,
           payloadGroups: [
@@ -1237,7 +1245,7 @@ function perthAiApp(): StoreShape {
         const recordId = this.topicForm.record_id || makeRecordId("topic");
         const existing = this.topics.find((row) => row.record_id === recordId);
         const siblingCount = this.topics.filter((row) => row.event_id === this.topicForm.event_id).length;
-        const record = buildRecordEnvelope("topic", {
+        const record = await buildRecordEnvelopeWithPersonalSigner("topic", {
           event_id: this.topicForm.event_id,
           slug: this.topicForm.slug || slugify(this.topicForm.title),
           title: this.topicForm.title,
@@ -1248,7 +1256,7 @@ function perthAiApp(): StoreShape {
           author_npub: this.session.npub,
         }, {
           recordId,
-          sender: this.buildWorkspaceSigner(),
+          sender: this.session,
           previousVersion: existing?.version || 0,
           writeGroupId: adminGroup.groupId,
           payloadGroups: [
@@ -1279,6 +1287,52 @@ function perthAiApp(): StoreShape {
       this.topicForm.description_markdown = topic.description_markdown;
       this.topicForm.state = state;
 	      await this.saveTopic();
+	    },
+
+	    async publishAllDraftTopics() {
+	      if (!this.isAdmin || !this.session) {
+	        this.error = "Admin login required.";
+	        return;
+	      }
+	      const drafts = [...this.draftTopics];
+	      if (drafts.length === 0) return;
+	      const label = drafts.length === 1 ? "1 draft topic" : `${drafts.length} draft topics`;
+	      if (!window.confirm(`Publish ${label}?`)) return;
+
+	      this.saving = true;
+	      this.clearNotice();
+	      try {
+	        const adminGroup = this.currentAdminGroupSecret();
+	        if (!adminGroup) throw new Error("Admin group key unavailable.");
+	        for (const topic of drafts) {
+	          const record = await buildRecordEnvelopeWithPersonalSigner("topic", {
+	            event_id: topic.event_id,
+	            slug: topic.slug,
+	            title: topic.title,
+	            description_markdown: topic.description_markdown,
+	            description_excerpt: topic.description_excerpt || excerpt(topic.description_markdown),
+	            state: "published",
+	            sort_order: topic.sort_order,
+	            author_npub: topic.author_npub,
+	          }, {
+	            recordId: topic.record_id,
+	            sender: this.session,
+	            previousVersion: topic.version,
+	            writeGroupId: adminGroup.groupId,
+	            payloadGroups: [
+	              { groupId: env.publicGroupId, groupNpub: env.publicGroupNpub, groupSecret: PUBLIC_GROUP_SECRET.secret, epoch: 1, write: false },
+	              { groupId: adminGroup.groupId, groupNpub: adminGroup.groupNpub, groupSecret: adminGroup.secret, epoch: adminGroup.epoch, write: true },
+	            ],
+	          });
+	          await this.syncAsAdmin(record, adminGroup);
+	        }
+	        await this.refreshAll();
+	        this.notice = `Published ${label}.`;
+	      } catch (error) {
+	        this.error = error instanceof Error ? error.message : String(error);
+	      } finally {
+	        this.saving = false;
+	      }
 	    },
 
 	    async setEventState(recordId: string, state: EventRecord["state"]) {
@@ -1325,13 +1379,12 @@ function perthAiApp(): StoreShape {
       if (!this.isAdmin || !this.session) return;
       const adminGroup = this.currentAdminGroupSecret();
       if (!adminGroup) return;
-      const signer = this.buildWorkspaceSigner();
-      const nextFirst = buildRecordEnvelope("topic", {
+      const nextFirst = await buildRecordEnvelopeWithPersonalSigner("topic", {
         ...first,
         sort_order: second.sort_order,
       }, {
         recordId: first.record_id,
-        sender: signer,
+        sender: this.session,
         previousVersion: first.version,
         writeGroupId: adminGroup.groupId,
         payloadGroups: [
@@ -1339,12 +1392,12 @@ function perthAiApp(): StoreShape {
           { groupId: adminGroup.groupId, groupNpub: adminGroup.groupNpub, groupSecret: adminGroup.secret, epoch: adminGroup.epoch, write: true },
         ],
       });
-      const nextSecond = buildRecordEnvelope("topic", {
+      const nextSecond = await buildRecordEnvelopeWithPersonalSigner("topic", {
         ...second,
         sort_order: first.sort_order,
       }, {
         recordId: second.record_id,
-        sender: signer,
+        sender: this.session,
         previousVersion: second.version,
         writeGroupId: adminGroup.groupId,
         payloadGroups: [
@@ -1503,14 +1556,13 @@ function perthAiApp(): StoreShape {
 
     async syncAsAdmin(record: any, adminGroup: GroupSecret) {
       if (!this.session) throw new Error("Admin login required.");
-      const signer = this.buildWorkspaceSigner();
       const token = await createNip98AuthHeaderForSecret(
         `${env.towerUrl}/api/v4/records/sync`,
         "POST",
         { owner_npub: env.workspaceOwnerNpub, records: [record] },
         adminGroup.secret,
       );
-      await syncSingleRecord(authFromIdentity(signer), record, {
+      await syncSingleRecord(authFromIdentity(this.session), record, {
         [adminGroup.groupId]: token,
       });
     },

@@ -455,7 +455,12 @@
               </div>
 
               <div class="editor-panel">
-                <h2>Draft Queue</h2>
+                <div class="panel-heading">
+                  <h2>Draft Queue</h2>
+                  <template x-if="draftTopics.length > 0">
+                    <button type="button" class="secondary-link" :disabled="saving" @click="publishAllDraftTopics()">Publish All</button>
+                  </template>
+                </div>
                 <div class="moderation-list">
                   <template x-for="topic in draftTopics" :key="topic.record_id">
                     <div class="moderation-item">

@@ -239,6 +239,14 @@ button, input, textarea, select { font: inherit; }
   gap: 0.8rem;
   flex-wrap: wrap;
 }
+.panel-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+.panel-heading h2 { margin: 0; }
 .section-heading h1,
 .section-heading h2 { color: var(--ink); }
 .section-heading p { margin: 0; color: var(--ink-soft); }

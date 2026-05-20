@@ -1,5 +1,5 @@
 import { env } from "../env";
-import { decodeBase64Utf8, decodeNsec, identityFromNsec, localDecryptFromNpub, localEncryptForNpub, personalDecryptFromNpub } from "./auth";
+import { decodeBase64Utf8, decodeNsec, identityFromNsec, localDecryptFromNpub, localEncryptForNpub, personalDecryptFromNpub, personalEncryptForNpub } from "./auth";
 import type {
   CommentRecord,
   EventRecord,
@@ -89,6 +89,16 @@ function buildOwnerPayload(sender: SessionIdentity, ownerNpub: string, payload: 
   };
 }
 
+async function buildOwnerPayloadWithPersonalSigner(sender: SessionIdentity, ownerNpub: string, payload: unknown) {
+  if (sender.nsec) return buildOwnerPayload(sender, ownerNpub, payload);
+  return {
+    ciphertext: JSON.stringify({
+      encrypted_by_npub: sender.npub,
+      ciphertext: await personalEncryptForNpub(sender, ownerNpub, JSON.stringify(payload)),
+    }),
+  };
+}
+
 type PayloadGroup = {
   groupId: string;
   groupNpub: string;
@@ -98,7 +108,6 @@ type PayloadGroup = {
 };
 
 function buildGroupPayloads(sender: SessionIdentity, groups: PayloadGroup[], payload: unknown) {
-  if (!sender.nsec) throw new Error("Signer secret is required to build group payloads.");
   const plaintext = JSON.stringify(payload);
   return groups.map((group) => ({
     group_id: group.groupId,
@@ -142,6 +151,42 @@ export function buildRecordEnvelope(
     signature_npub: options.sender.npub,
     write_group_id: options.writeGroupId,
     owner_payload: buildOwnerPayload(options.sender, options.ownerNpub || env.workspaceOwnerNpub, payload),
+    group_payloads: buildGroupPayloads(options.sender, options.payloadGroups, payload),
+    updated_at: new Date().toISOString(),
+  } as SyncRecord;
+}
+
+export async function buildRecordEnvelopeWithPersonalSigner(
+  family: FamilyName,
+  data: Record<string, unknown>,
+  options: {
+    recordId: string;
+    sender: SessionIdentity;
+    ownerNpub?: string;
+    previousVersion?: number;
+    version?: number;
+    writeGroupId: string;
+    payloadGroups: PayloadGroup[];
+  },
+): Promise<SyncRecord> {
+  const payload = {
+    app_namespace: env.appNpub,
+    collection_space: family,
+    schema_version: 1,
+    record_id: options.recordId,
+    data,
+  };
+  const ownerNpub = options.ownerNpub || env.workspaceOwnerNpub;
+
+  return {
+    record_id: options.recordId,
+    owner_npub: ownerNpub,
+    record_family_hash: recordFamilyHash(family),
+    version: options.version ?? (options.previousVersion ?? 0) + 1,
+    previous_version: options.previousVersion ?? 0,
+    signature_npub: options.sender.npub,
+    write_group_id: options.writeGroupId,
+    owner_payload: await buildOwnerPayloadWithPersonalSigner(options.sender, ownerNpub, payload),
     group_payloads: buildGroupPayloads(options.sender, options.payloadGroups, payload),
     updated_at: new Date().toISOString(),
   } as SyncRecord;
