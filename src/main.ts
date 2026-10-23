@@ -180,6 +180,10 @@ function perthAiApp(): StoreShape {
 	    },
 	    meetupUrl: env.meetupUrl,
 	    topicActionMenuId: "",
+	    topicDragId: "",
+	    topicDropTargetId: "",
+	    topicDropPlacement: "before" as "before" | "after",
+	    suppressTopicClick: false,
 	    agentConnectView: "instructions" as "instructions" | "package",
 	    agentConnectCopied: false,
 	    agentPackageCopied: false,
@@ -218,6 +222,7 @@ function perthAiApp(): StoreShape {
       title: "",
       description_markdown: "",
       state: "draft",
+      sort_order: 0,
     },
     topicSubmissionForm: {
       event_id: "",
@@ -459,6 +464,7 @@ function perthAiApp(): StoreShape {
 	      this.modals.topic = false;
 	      this.modals.agentConnect = false;
 	      this.topicActionMenuId = "";
+	      this.clearTopicDragState();
 	    },
 
 	    setEventTab(tab: "about" | "topics") {
@@ -515,7 +521,7 @@ function perthAiApp(): StoreShape {
 	      }
 	      const anchorId = this.topicAnchorFromHash();
 	      if (!anchorId) {
-	        this.eventTab = "about";
+	        this.eventTab = "topics";
 	        return;
 	      }
 	      this.eventTab = "topics";
@@ -528,6 +534,12 @@ function perthAiApp(): StoreShape {
 
 	    closeTopicActionMenu() {
 	      this.topicActionMenuId = "";
+	    },
+
+	    clearTopicDragState() {
+	      this.topicDragId = "";
+	      this.topicDropTargetId = "";
+	      this.topicDropPlacement = "before";
 	    },
 
     toggleAccountMenu() {
@@ -562,9 +574,8 @@ function perthAiApp(): StoreShape {
       return this.renderMarkdown(this.workspaceDescription || this.workspaceSummary);
     },
 
-    get heroStyle() {
-      const imageUrl = this.workspaceProfile?.hero_image_url || "/perth-ai-roundtable.png";
-      return `background-image: url('${imageUrl}');`;
+    get heroImageUrl() {
+      return this.workspaceProfile?.hero_image_url || "/perth-ai-roundtable.png";
     },
 
     get allEventsSorted() {
@@ -806,6 +817,10 @@ function perthAiApp(): StoreShape {
 	    },
 
 	    openTopicFromCard(topic: TopicRecord) {
+	      if (this.suppressTopicClick) {
+	        this.suppressTopicClick = false;
+	        return;
+	      }
 	      const returnUrl = this.eventUrlForTopicAnchor(topic);
 	      if (returnUrl) {
 	        window.history.replaceState(window.history.state ?? {}, "", returnUrl);
@@ -818,6 +833,55 @@ function perthAiApp(): StoreShape {
         .filter((topic) => topic.event_id === eventId)
         .filter((topic) => this.isAdmin || topic.state === "published" || topic.state === "archived")
         .sort((a, b) => a.sort_order - b.sort_order || (a.updated_at > b.updated_at ? -1 : 1));
+    },
+
+    topicCardDragClass(topic: TopicRecord) {
+      if (!this.isAdmin) return "";
+      if (this.topicDragId === topic.record_id) return "topic-card-dragging";
+      if (this.topicDropTargetId !== topic.record_id) return "";
+      return this.topicDropPlacement === "after" ? "topic-card-drop-after" : "topic-card-drop-before";
+    },
+
+    startTopicDrag(recordId: string, event: DragEvent) {
+      if (!this.isAdmin || this.saving) return;
+      this.topicDragId = recordId;
+      this.topicDropTargetId = "";
+      this.topicDropPlacement = "before";
+      this.suppressTopicClick = true;
+      this.topicActionMenuId = "";
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", recordId);
+      }
+    },
+
+    dragTopicOver(recordId: string, event: DragEvent) {
+      if (!this.topicDragId || this.topicDragId === recordId) return;
+      const target = event.currentTarget as HTMLElement | null;
+      const rect = target?.getBoundingClientRect();
+      const midpoint = rect ? rect.top + rect.height / 2 : 0;
+      this.topicDropTargetId = recordId;
+      this.topicDropPlacement = rect && event.clientY > midpoint ? "after" : "before";
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    },
+
+    async dropTopicOn(recordId: string, event: DragEvent) {
+      const draggedId = this.topicDragId || event.dataTransfer?.getData("text/plain") || "";
+      if (!draggedId || draggedId === recordId) {
+        this.clearTopicDragState();
+        return;
+      }
+      this.suppressTopicClick = true;
+      const placement = this.topicDropPlacement;
+      this.clearTopicDragState();
+      await this.moveTopicToDropTarget(draggedId, recordId, placement);
+    },
+
+    endTopicDrag() {
+      this.clearTopicDragState();
+      window.setTimeout(() => {
+        this.suppressTopicClick = false;
+      }, 200);
     },
 
     visibleCommentsForTopic(topicId: string) {
@@ -1219,18 +1283,96 @@ function perthAiApp(): StoreShape {
       this.topicForm.title = topic.title;
       this.topicForm.description_markdown = topic.description_markdown;
       this.topicForm.state = topic.state;
+      this.topicForm.sort_order = topic.sort_order;
 	      this.openModal("topic");
 	    },
 
     resetTopicForm() {
+      const eventId = this.events[0]?.record_id || "";
       this.topicForm = {
         record_id: "",
-        event_id: this.events[0]?.record_id || "",
+        event_id: eventId,
         slug: "",
         title: "",
         description_markdown: "",
         state: "draft",
+        sort_order: this.topics.filter((row) => row.event_id === eventId).length,
       };
+    },
+
+    topicSyncPayload(input: {
+      event_id: string;
+      slug: string;
+      title: string;
+      description_markdown: string;
+      description_excerpt?: string;
+      state: TopicRecord["state"];
+      sort_order: number;
+      author_npub: string;
+    }) {
+      const description = String(input.description_markdown || "");
+      return {
+        event_id: input.event_id,
+        slug: input.slug,
+        title: input.title,
+        description_markdown: description,
+        description_excerpt: input.description_excerpt || excerpt(description),
+        state: input.state,
+        sort_order: Number(input.sort_order || 0),
+        author_npub: input.author_npub,
+      };
+    },
+
+    adminTopicPayloadGroups(adminGroup: GroupSecret) {
+      return [
+        { groupId: env.publicGroupId, groupNpub: env.publicGroupNpub, groupSecret: PUBLIC_GROUP_SECRET.secret, epoch: 1, write: false },
+        { groupId: adminGroup.groupId, groupNpub: adminGroup.groupNpub, groupSecret: adminGroup.secret, epoch: adminGroup.epoch, write: true },
+      ];
+    },
+
+    publicTopicUpgradePayloadGroups(adminGroup: GroupSecret) {
+      return [
+        { groupId: env.publicGroupId, groupNpub: env.publicGroupNpub, groupSecret: PUBLIC_GROUP_SECRET.secret, epoch: 1, write: false },
+        { groupId: adminGroup.groupId, groupNpub: adminGroup.groupNpub, groupSecret: adminGroup.secret, epoch: adminGroup.epoch, write: true },
+      ];
+    },
+
+    async buildAdminTopicRecord(recordId: string, previousVersion: number, data: Record<string, unknown>, adminGroup: GroupSecret) {
+      if (!this.session) throw new Error("Admin login required.");
+      return buildRecordEnvelopeWithPersonalSigner("topic", data, {
+        recordId,
+        sender: this.session,
+        previousVersion,
+        writeGroupId: adminGroup.groupId,
+        payloadGroups: this.adminTopicPayloadGroups(adminGroup),
+      });
+    },
+
+    buildPublicTopicUpgradeRecord(recordId: string, previousVersion: number, data: Record<string, unknown>, adminGroup: GroupSecret) {
+      const publicSigner = publicSignerIdentity();
+      return buildRecordEnvelope("topic", data, {
+        recordId,
+        sender: publicSigner,
+        previousVersion,
+        writeGroupId: env.publicGroupId,
+        payloadGroups: this.publicTopicUpgradePayloadGroups(adminGroup),
+      });
+    },
+
+    isPriorWriteGroupRejection(error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return message.includes("does not have write access on prior version");
+    },
+
+    async syncTopicAsAdmin(recordId: string, previousVersion: number, data: Record<string, unknown>, adminGroup: GroupSecret) {
+      const adminRecord = await this.buildAdminTopicRecord(recordId, previousVersion, data, adminGroup);
+      try {
+        await this.syncAsAdmin(adminRecord, adminGroup);
+      } catch (error) {
+        if (previousVersion <= 0 || !this.isPriorWriteGroupRejection(error)) throw error;
+        const upgradeRecord = this.buildPublicTopicUpgradeRecord(recordId, previousVersion, data, adminGroup);
+        await this.syncAsPublic(upgradeRecord);
+      }
     },
 
     async saveTopic() {
@@ -1245,26 +1387,19 @@ function perthAiApp(): StoreShape {
         const recordId = this.topicForm.record_id || makeRecordId("topic");
         const existing = this.topics.find((row) => row.record_id === recordId);
         const siblingCount = this.topics.filter((row) => row.event_id === this.topicForm.event_id).length;
-        const record = await buildRecordEnvelopeWithPersonalSigner("topic", {
+        const sortOrder = Number.isFinite(Number(this.topicForm.sort_order))
+          ? Number(this.topicForm.sort_order)
+          : (existing?.sort_order ?? siblingCount);
+        const payload = this.topicSyncPayload({
           event_id: this.topicForm.event_id,
           slug: this.topicForm.slug || slugify(this.topicForm.title),
           title: this.topicForm.title,
           description_markdown: this.topicForm.description_markdown,
-          description_excerpt: excerpt(this.topicForm.description_markdown),
-          state: this.topicForm.state,
-          sort_order: existing?.sort_order ?? siblingCount,
-          author_npub: this.session.npub,
-        }, {
-          recordId,
-          sender: this.session,
-          previousVersion: existing?.version || 0,
-          writeGroupId: adminGroup.groupId,
-          payloadGroups: [
-            { groupId: env.publicGroupId, groupNpub: env.publicGroupNpub, groupSecret: PUBLIC_GROUP_SECRET.secret, epoch: 1, write: false },
-            { groupId: adminGroup.groupId, groupNpub: adminGroup.groupNpub, groupSecret: adminGroup.secret, epoch: adminGroup.epoch, write: true },
-          ],
+          state: this.topicForm.state as TopicRecord["state"],
+          sort_order: sortOrder,
+          author_npub: existing?.author_npub || this.session.npub,
         });
-        await this.syncAsAdmin(record, adminGroup);
+        await this.syncTopicAsAdmin(recordId, existing?.version || 0, payload, adminGroup);
         await this.refreshAll();
         this.resetTopicForm();
         this.closeModal("topic");
@@ -1286,6 +1421,7 @@ function perthAiApp(): StoreShape {
       this.topicForm.title = topic.title;
       this.topicForm.description_markdown = topic.description_markdown;
       this.topicForm.state = state;
+      this.topicForm.sort_order = topic.sort_order;
 	      await this.saveTopic();
 	    },
 
@@ -1305,7 +1441,7 @@ function perthAiApp(): StoreShape {
 	        const adminGroup = this.currentAdminGroupSecret();
 	        if (!adminGroup) throw new Error("Admin group key unavailable.");
 	        for (const topic of drafts) {
-	          const record = await buildRecordEnvelopeWithPersonalSigner("topic", {
+	          const payload = this.topicSyncPayload({
 	            event_id: topic.event_id,
 	            slug: topic.slug,
 	            title: topic.title,
@@ -1314,17 +1450,8 @@ function perthAiApp(): StoreShape {
 	            state: "published",
 	            sort_order: topic.sort_order,
 	            author_npub: topic.author_npub,
-	          }, {
-	            recordId: topic.record_id,
-	            sender: this.session,
-	            previousVersion: topic.version,
-	            writeGroupId: adminGroup.groupId,
-	            payloadGroups: [
-	              { groupId: env.publicGroupId, groupNpub: env.publicGroupNpub, groupSecret: PUBLIC_GROUP_SECRET.secret, epoch: 1, write: false },
-	              { groupId: adminGroup.groupId, groupNpub: adminGroup.groupNpub, groupSecret: adminGroup.secret, epoch: adminGroup.epoch, write: true },
-	            ],
 	          });
-	          await this.syncAsAdmin(record, adminGroup);
+	          await this.syncTopicAsAdmin(topic.record_id, topic.version, payload, adminGroup);
 	        }
 	        await this.refreshAll();
 	        this.notice = `Published ${label}.`;
@@ -1377,38 +1504,64 @@ function perthAiApp(): StoreShape {
 
     async swapTopicOrder(first: TopicRecord, second: TopicRecord) {
       if (!this.isAdmin || !this.session) return;
+      const siblings = this.visibleTopicsForEvent(first.event_id);
+      const firstIndex = siblings.findIndex((topic) => topic.record_id === first.record_id);
+      const secondIndex = siblings.findIndex((topic) => topic.record_id === second.record_id);
+      if (firstIndex < 0 || secondIndex < 0) return;
+      const reordered = [...siblings];
+      reordered[firstIndex] = second;
+      reordered[secondIndex] = first;
+      await this.persistTopicOrder(first.event_id, reordered);
+    },
+
+    async moveTopicToDropTarget(draggedId: string, targetId: string, placement: "before" | "after") {
+      if (!this.isAdmin || !this.session) return;
+      const dragged = this.topics.find((topic) => topic.record_id === draggedId);
+      const target = this.topics.find((topic) => topic.record_id === targetId);
+      if (!dragged || !target || dragged.event_id !== target.event_id) return;
+      const siblings = this.visibleTopicsForEvent(dragged.event_id);
+      const withoutDragged = siblings.filter((topic) => topic.record_id !== draggedId);
+      const targetIndex = withoutDragged.findIndex((topic) => topic.record_id === targetId);
+      if (targetIndex < 0) return;
+      const insertIndex = placement === "after" ? targetIndex + 1 : targetIndex;
+      const reordered = [
+        ...withoutDragged.slice(0, insertIndex),
+        dragged,
+        ...withoutDragged.slice(insertIndex),
+      ];
+      await this.persistTopicOrder(dragged.event_id, reordered);
+    },
+
+    async persistTopicOrder(eventId: string, orderedTopics: TopicRecord[]) {
+      if (!this.isAdmin || !this.session) return;
       const adminGroup = this.currentAdminGroupSecret();
       if (!adminGroup) return;
-      const nextFirst = await buildRecordEnvelopeWithPersonalSigner("topic", {
-        ...first,
-        sort_order: second.sort_order,
-      }, {
-        recordId: first.record_id,
-        sender: this.session,
-        previousVersion: first.version,
-        writeGroupId: adminGroup.groupId,
-        payloadGroups: [
-          { groupId: env.publicGroupId, groupNpub: env.publicGroupNpub, groupSecret: PUBLIC_GROUP_SECRET.secret, epoch: 1, write: false },
-          { groupId: adminGroup.groupId, groupNpub: adminGroup.groupNpub, groupSecret: adminGroup.secret, epoch: adminGroup.epoch, write: true },
-        ],
+      const normalized = orderedTopics.map((topic, index) => ({ ...topic, sort_order: index }));
+      const changed = normalized.filter((topic) => {
+        const current = this.topics.find((row) => row.record_id === topic.record_id);
+        return current && current.sort_order !== topic.sort_order;
       });
-      const nextSecond = await buildRecordEnvelopeWithPersonalSigner("topic", {
-        ...second,
-        sort_order: first.sort_order,
-      }, {
-        recordId: second.record_id,
-        sender: this.session,
-        previousVersion: second.version,
-        writeGroupId: adminGroup.groupId,
-        payloadGroups: [
-          { groupId: env.publicGroupId, groupNpub: env.publicGroupNpub, groupSecret: PUBLIC_GROUP_SECRET.secret, epoch: 1, write: false },
-          { groupId: adminGroup.groupId, groupNpub: adminGroup.groupNpub, groupSecret: adminGroup.secret, epoch: adminGroup.epoch, write: true },
-        ],
+      if (changed.length === 0) return;
+      const now = new Date().toISOString();
+      this.topics = this.topics.map((topic) => {
+        const next = normalized.find((row) => row.record_id === topic.record_id);
+        if (next) return { ...topic, sort_order: next.sort_order, updated_at: now };
+        return topic;
       });
-      await this.syncAsAdmin(nextFirst, adminGroup);
-      await this.syncAsAdmin(nextSecond, adminGroup);
-      await this.refreshAll();
-      this.notice = "Topic order updated.";
+      try {
+        this.saving = true;
+        for (const topic of changed) {
+          const payload = this.topicSyncPayload(topic);
+          await this.syncTopicAsAdmin(topic.record_id, topic.version, payload, adminGroup);
+        }
+        await this.refreshAll();
+        this.notice = "Topic order updated.";
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : String(error);
+        await this.refreshAll();
+      } finally {
+        this.saving = false;
+      }
     },
 
     async submitTopic() {

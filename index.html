@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/favicon.png" />
     <title>Perth AI</title>
     <script src="/config.js"></script>
     <script type="module" src="/src/main.ts"></script>
@@ -58,7 +60,9 @@
         </template>
 
         <section x-show="route.name === 'home'" class="page page-home">
-          <section class="hero-stage hero-stage-large" :style="heroStyle"></section>
+          <section class="hero-stage hero-stage-large">
+            <img class="hero-stage-image" :src="heroImageUrl" :alt="workspaceTitle" />
+          </section>
 
           <div class="main-flow">
             <section class="content-block home-section">
@@ -192,12 +196,18 @@
 	                    <template x-for="topic in visibleTopicsForEvent(currentEvent?.record_id || '')" :key="topic.record_id">
 	                      <article
 	                        class="topic-card topic-card-prominent topic-card-clickable"
+	                        :class="topicCardDragClass(topic)"
 	                        :id="topicAnchorId(topic)"
 	                        role="link"
 	                        tabindex="0"
+	                        :draggable="isAdmin && !saving"
 	                        @click="openTopicFromCard(topic)"
 	                        @keydown.enter.prevent="openTopicFromCard(topic)"
 	                        @keydown.space.prevent="openTopicFromCard(topic)"
+	                        @dragstart.stop="startTopicDrag(topic.record_id, $event)"
+	                        @dragover.prevent="dragTopicOver(topic.record_id, $event)"
+	                        @drop.stop.prevent="dropTopicOn(topic.record_id, $event)"
+	                        @dragend="endTopicDrag()"
 	                      >
 	                        <div class="topic-card-head">
 	                          <div>
@@ -205,18 +215,21 @@
 	                            <h3 x-text="topic.title"></h3>
 	                          </div>
 	                          <template x-if="isAdmin">
-	                            <div class="overflow-menu" @click.stop @click.outside="closeTopicActionMenu()">
-	                              <button
-	                                type="button"
-	                                class="menu-trigger"
-	                                aria-label="Topic actions"
-	                                :aria-expanded="topicActionMenuId === topic.record_id"
-	                                @click.stop="toggleTopicActionMenu(topic.record_id)"
-	                              >...</button>
-	                              <div class="overflow-menu-panel" x-show="topicActionMenuId === topic.record_id" x-transition.opacity>
-	                                <button type="button" @click.stop="moveTopic(topic.record_id, -1)">Up</button>
-	                                <button type="button" @click.stop="moveTopic(topic.record_id, 1)">Down</button>
-	                                <button type="button" @click.stop="editTopic(topic.record_id)">Edit</button>
+	                            <div class="topic-admin-actions">
+	                              <span class="topic-drag-handle" role="img" aria-label="Drag topic"></span>
+	                              <div class="overflow-menu" @click.stop @click.outside="closeTopicActionMenu()">
+	                                <button
+	                                  type="button"
+	                                  class="menu-trigger"
+	                                  aria-label="Topic actions"
+	                                  :aria-expanded="topicActionMenuId === topic.record_id"
+	                                  @click.stop="toggleTopicActionMenu(topic.record_id)"
+	                                >...</button>
+	                                <div class="overflow-menu-panel" x-show="topicActionMenuId === topic.record_id" x-transition.opacity>
+	                                  <button type="button" @click.stop="moveTopic(topic.record_id, -1)">Up</button>
+	                                  <button type="button" @click.stop="moveTopic(topic.record_id, 1)">Down</button>
+	                                  <button type="button" @click.stop="editTopic(topic.record_id)">Edit</button>
+	                                </div>
 	                              </div>
 	                            </div>
 	                          </template>
@@ -611,6 +624,7 @@
                 <option value="deleted">Deleted</option>
               </select>
             </label>
+            <label><span>Position</span><input type="number" min="0" step="1" x-model.number="topicForm.sort_order" /></label>
             <label><span>Description</span><textarea x-model="topicForm.description_markdown" rows="10" @paste="handleTopicPaste($event)"></textarea></label>
             <div class="upload-strip">
               <label class="upload-label">

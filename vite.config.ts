@@ -5,6 +5,7 @@ const allowedHosts = [
   "127.0.0.1",
   ".otherstuff.ai",
   ".otherstuff.studio",
+  ".rick.runwingman.com",
 ];
 
 export default defineConfig({

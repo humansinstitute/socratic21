@@ -186,13 +186,23 @@ button, input, textarea, select { font: inherit; }
 
 .hero-stage {
   position: relative;
-  min-height: min(78vh, 920px);
+  width: 100vw;
+  max-width: none;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+  min-height: 0;
   overflow: hidden;
-  background-size: cover;
-  background-position: center;
-  display: flex;
-  align-items: flex-end;
-  padding: 2.2rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.hero-stage-image {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 .hero-stage-overlay {
@@ -510,6 +520,14 @@ button, input, textarea, select { font: inherit; }
   transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
 }
 
+.topic-card[draggable="true"] {
+  cursor: grab;
+}
+
+.topic-card[draggable="true"]:active {
+  cursor: grabbing;
+}
+
 .topic-card-clickable:hover,
 .topic-card-clickable:focus-visible {
   transform: translateY(-1px);
@@ -517,9 +535,46 @@ button, input, textarea, select { font: inherit; }
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.16);
 }
 
+.topic-card-dragging {
+  opacity: 0.5;
+}
+
+.topic-card-drop-before,
+.topic-card-drop-after {
+  border-color: rgba(217, 95, 45, 0.68);
+  box-shadow: 0 0 0 2px rgba(217, 95, 45, 0.28), var(--shadow);
+}
+
+.topic-card-drop-before {
+  transform: translateY(-3px);
+}
+
+.topic-card-drop-after {
+  transform: translateY(3px);
+}
+
 .topic-card-clickable:focus-visible {
   outline: 2px solid rgba(217, 95, 45, 0.48);
   outline-offset: 2px;
+}
+
+.topic-admin-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex: 0 0 auto;
+}
+
+.topic-drag-handle {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  border-radius: 0.4rem;
+  background:
+    radial-gradient(circle, rgba(17, 24, 39, 0.58) 0 2px, transparent 2.5px) 0.45rem 0.45rem / 0.55rem 0.55rem,
+    rgba(255, 255, 255, 0.94);
 }
 
 .overflow-menu {
@@ -746,7 +801,6 @@ button, input, textarea, select { font: inherit; }
 
 @media (max-width: 1040px) {
   .event-hero-panel { grid-template-columns: 1fr; }
-  .hero-stage { min-height: 56vh; }
   .event-hero-image {
     aspect-ratio: 4 / 5;
     min-height: 0;
@@ -759,7 +813,6 @@ button, input, textarea, select { font: inherit; }
   .avatar-meta { display: none; }
   .site-main { padding: 1rem 0.85rem 3.5rem; }
 
-  .hero-stage { min-height: 48vh; padding: 1rem; }
   .hero-stage h1 { font-size: clamp(2.2rem, 11vw, 3.8rem); }
 
   .archive-item,
